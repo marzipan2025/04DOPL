@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 640px;
+    height: 480px;
+    background-color: #C9CBBE;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  .title {
+    position: absolute;
+    top: 26px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: 'Avenir Next', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 156px;
+    font-weight: 100;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    color: #39486A;
+  }
+
+  .subtitle {
+    position: absolute;
+    top: 218px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: 'Avenir Next', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 13px;
+    font-weight: 300;
+    letter-spacing: 0.02em;
+    color: #39486A;
+  }
+
+  .drag-line {
+    position: absolute;
+    top: 239px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+  }
+
+  .drag-line .line {
+    width: 200px;
+    height: 1px;
+    background-color: #39486A;
+    opacity: 0.45;
+  }
+
+  .drag-line .plus {
+    font-family: 'Helvetica Neue', Helvetica, sans-serif;
+    font-size: 14px;
+    font-weight: 200;
+    color: #39486A;
+    opacity: 0.5;
+    margin-left: 3px;
+    line-height: 1;
+    position: relative;
+    top: -1px;
+  }
+
+  .copyright {
+    position: absolute;
+    bottom: 22px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-family: 'Avenir Next', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 10px;
+    font-weight: 300;
+    letter-spacing: 0.18em;
+    color: #39486A;
+    opacity: 0.6;
+  }
+</style>
+</head>
+<body>
+  <div class="title">04DOPL</div>
+  <div class="subtitle">시스템 설정  →  개인정보 보호 및 보안  →  확인 없이 열기</div>
+  <div class="drag-line">
+    <div class="line"></div>
+    <div class="plus">+</div>
+  </div>
+  <div class="copyright">COPYRIGHT 2026 ARTBRAIN</div>
+</body>
+</html>
