@@ -64,6 +64,28 @@ struct WindowDragArea: NSViewRepresentable {
     }
 }
 
+struct WindowAccessor: NSViewRepresentable {
+    let onResolve: (NSWindow) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            if let window = view.window {
+                onResolve(window)
+            }
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            if let window = nsView.window {
+                onResolve(window)
+            }
+        }
+    }
+}
+
 class WindowDragNSView: NSView {
     var onRightClick: ((CGPoint) -> Void)?
     var onScrollUp: (() -> Void)?
@@ -950,6 +972,7 @@ private struct DotsOverlayView: View {
 struct ContentView: View {
     @StateObject private var sampler = VideoSampler()
     @EnvironmentObject private var recents: RecentsStore
+    @State private var hostWindow: NSWindow?
     @State private var keyMonitor: Any?
     @State private var cursorHider = CursorAutoHider()
     @State private var isFullscreen = false
@@ -990,6 +1013,7 @@ struct ContentView: View {
     @AppStorage("04dopl.lastMedia.kind")  private var lastMediaKind: String = ""
     @AppStorage("04dopl.lastMedia.value") private var lastMediaValue: String = ""
     @AppStorage("04dopl.lastMedia.paths") private var lastMediaPathsData: String = ""
+    @AppStorage("04dopl.lastMedia.title") private var lastMediaTitle: String = ""
 
     private var backgroundStyle: BackgroundStyle {
         BackgroundStyle(rawValue: backgroundStyleRaw) ?? .blur
@@ -1033,6 +1057,10 @@ struct ContentView: View {
             return URL(fileURLWithPath: first).lastPathComponent
         case "url":
             guard !lastMediaValue.isEmpty else { return nil }
+            let normalizedTitle = lastMediaTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !normalizedTitle.isEmpty {
+                return normalizedTitle
+            }
             var text = lastMediaValue
             if text.hasPrefix("https://") { text.removeFirst(8) }
             else if text.hasPrefix("http://") { text.removeFirst(7) }
@@ -1054,6 +1082,7 @@ struct ContentView: View {
         lastMediaKind = "file"
         lastMediaValue = url.path
         lastMediaPathsData = ""
+        lastMediaTitle = ""
         if addToRecents { recents.addFile(url) }
     }
     private func rememberLastFileGroup(_ urls: [URL], addToRecents: Bool = true) {
@@ -1061,6 +1090,7 @@ struct ContentView: View {
         guard let first = paths.first else { return }
         lastMediaKind = "fileGroup"
         lastMediaValue = first
+        lastMediaTitle = ""
         if let data = try? JSONEncoder().encode(paths),
            let encoded = String(data: data, encoding: .utf8) {
             lastMediaPathsData = encoded
@@ -1069,11 +1099,13 @@ struct ContentView: View {
         }
         if addToRecents { recents.addFileGroup(urls) }
     }
-    private func rememberLastURL(_ urlString: String) {
+    private func rememberLastURL(_ urlString: String, title: String? = nil) {
         lastMediaKind = "url"
         lastMediaValue = urlString
         lastMediaPathsData = ""
-        recents.addURL(urlString)
+        let normalizedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        lastMediaTitle = normalizedTitle
+        recents.addURL(urlString, title: normalizedTitle.isEmpty ? nil : normalizedTitle)
     }
 
     /// 대기 상태 + 저장값 존재하면 복원. 아니면 false.
@@ -1302,7 +1334,43 @@ struct ContentView: View {
                     dragAccumulator = .zero
                 }
         )
-        .onAppear { installKeyMonitor() }
+        .background(
+            WindowAccessor { window in
+                guard hostWindow !== window else { return }
+                hostWindow = window
+                if let delegate = NSApplication.shared.delegate as? AppDelegate {
+                    window.delegate = delegate
+                }
+                AppDelegate.applyStyle(window)
+                _ = AppDelegate.deliverPendingExternalMediaOpenRequestIfPossible()
+            }
+        )
+        .onAppear {
+            installKeyMonitor()
+            DispatchQueue.main.async {
+                if let hostWindow {
+                    AppDelegate.applyStyle(hostWindow)
+                    hostWindow.makeKeyAndOrderFront(nil)
+                } else {
+                    AppDelegate.applyStyleToCurrentWindowIfNeeded()
+                }
+                _ = AppDelegate.deliverPendingExternalMediaOpenRequestIfPossible()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                if let hostWindow {
+                    AppDelegate.applyStyle(hostWindow)
+                } else {
+                    AppDelegate.applyStyleToCurrentWindowIfNeeded()
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                if let hostWindow {
+                    AppDelegate.applyStyle(hostWindow)
+                } else {
+                    AppDelegate.applyStyleToCurrentWindowIfNeeded()
+                }
+            }
+        }
         .onDisappear {
             if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
             cursorHider.stop()
@@ -1666,11 +1734,13 @@ struct ContentView: View {
         guard let value = (note.userInfo?["url"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty else { return }
+        let displayTitle = (note.userInfo?["displayTitle"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
         if isEditingURL { isEditingURL = false; urlBuffer = "" }
         dismissPlaybackInfo()
-        rememberLastURL(value)
+        rememberLastURL(value, title: displayTitle)
         pendingAutoResize = true
         sampler.openURL(value)
     }
@@ -1689,7 +1759,11 @@ struct ContentView: View {
         guard !isEditingURL, hasPlaybackInfoContent else { return }
         NSApp.activate(ignoringOtherApps: true)
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
-        isShowingPlaybackInfo = true
+        if isShowingPlaybackInfo {
+            dismissPlaybackInfo()
+        } else {
+            isShowingPlaybackInfo = true
+        }
     }
 
     private func handleToggleAlwaysOnTop(_ note: Notification) {
@@ -1707,7 +1781,8 @@ struct ContentView: View {
               let value   = info["value"] as? String,
               let kind    = RecentItem.Kind(rawValue: kindRaw) else { return }
         let paths = info["paths"] as? [String]
-        openRecentItem(kind: kind, value: value, paths: paths)
+        let title = (info["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        openRecentItem(kind: kind, value: value, paths: paths, title: title)
     }
 
     /// 메인 앱 윈도우를 가장 확실하게 찾아 전체화면 전환을 수행하는 헬퍼.
@@ -1737,7 +1812,7 @@ struct ContentView: View {
     /// File → Open Recent 메뉴 클릭 처리.
     /// 파일: 존재 여부 확인 후 단일 항목 플레이리스트로 열기. 없으면 recents 에서 제거 + 보더 깜빡.
     /// URL : 바로 재생(네트워크 실패는 기존 urlLoadError 경로 사용).
-    private func openRecentItem(kind: RecentItem.Kind, value: String, paths: [String]?) {
+    private func openRecentItem(kind: RecentItem.Kind, value: String, paths: [String]?, title: String?) {
         switch kind {
         case .file:
             let url = URL(fileURLWithPath: value)
@@ -1764,7 +1839,7 @@ struct ContentView: View {
         case .url:
             if isEditingURL { isEditingURL = false; urlBuffer = "" }
             dismissPlaybackInfo()
-            rememberLastURL(value)
+            rememberLastURL(value, title: title)
             pendingAutoResize = true
             sampler.openURL(value)
         }

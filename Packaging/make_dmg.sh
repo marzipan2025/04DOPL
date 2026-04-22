@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────
-# make_dmg.sh  —  04dopl 1.0.5 DMG 패키져 (ffmpeg 임베드 포함)
+# make_dmg.sh  —  04dopl 1.0.6 DMG 패키져 (ffmpeg 임베드 포함)
 # ─────────────────────────────────────────────────────────
 set -e
 
 APP_NAME="04dopl"
-VOL_NAME="04dopl 1.0.5"
-VERSION="1.0.5"
+VOL_NAME="04dopl 1.0.6"
+VERSION="1.0.6"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"

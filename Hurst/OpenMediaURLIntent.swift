@@ -1,5 +1,4 @@
 import AppIntents
-import AppKit
 import Foundation
 
 struct OpenMediaURLIntent: AppIntent {
@@ -10,28 +9,34 @@ struct OpenMediaURLIntent: AppIntent {
     @Parameter(title: "URL")
     var url: String
 
+    @Parameter(title: "Display Title")
+    var displayTitle: String?
+
     static var parameterSummary: some ParameterSummary {
-        Summary("Open \(\.$url)")
+        Summary("Open \(\.$url) with title \(\.$displayTitle)")
     }
 
     @MainActor
     func perform() async throws -> some IntentResult {
         let value = url.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return .result() }
-
-        if NSApp.windows.first?.contentView != nil {
-            NotificationCenter.default.post(
-                name: .externalOpenMediaURL,
-                object: nil,
-                userInfo: ["url": value]
-            )
+        let normalizedTitle = displayTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackTitle: String?
+        if let normalizedTitle, !normalizedTitle.isEmpty {
+            fallbackTitle = normalizedTitle
         } else {
+            fallbackTitle = AppDelegate.pendingExternalDisplayTitle()
+        }
+        guard let request = AppDelegate.mediaOpenRequest(from: value, displayTitle: fallbackTitle) else {
+            return .result()
+        }
+        AppDelegate.queueExternalMediaOpenRequest(request)
+        if !AppDelegate.deliverPendingExternalMediaOpenRequestIfPossible() {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                NotificationCenter.default.post(
-                    name: .externalOpenMediaURL,
-                    object: nil,
-                    userInfo: ["url": value]
-                )
+                _ = AppDelegate.deliverPendingExternalMediaOpenRequestIfPossible()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) {
+                _ = AppDelegate.deliverPendingExternalMediaOpenRequestIfPossible()
             }
         }
 

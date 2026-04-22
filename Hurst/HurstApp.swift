@@ -14,8 +14,50 @@ extension Notification.Name {
     /// Finder "Open With…" / 외부 open 이벤트. userInfo["urls"] = [URL]
     static let externalOpenURLs      = Notification.Name("externalOpenURLs")
     static let externalOpenMediaURL = Notification.Name("externalOpenMediaURL")
-    /// 최근 항목 메뉴 클릭. userInfo["kind"], ["value"], ["paths"] 를 사용.
+    /// 최근 항목 메뉴 클릭. userInfo["kind"], ["value"], ["paths"], ["title"] 를 사용.
     static let openRecentRequested   = Notification.Name("openRecentRequested")
+}
+
+struct ExternalMediaOpenRequest {
+    let url: String
+    let displayTitle: String?
+}
+
+private enum PendingExternalMediaOpenStore {
+    static let appDomain = "com.hurst.app"
+    static let urlKey = "04dopl.pendingExternalMediaOpen.url"
+    static let titleKey = "04dopl.pendingExternalMediaOpen.title"
+    static let titleFileURL = URL(fileURLWithPath: "/tmp/04dopl.pendingExternalMediaOpen.title")
+
+    static var defaults: UserDefaults {
+        UserDefaults(suiteName: appDomain) ?? .standard
+    }
+
+    static func persistedTitle() -> String? {
+        let defaultsTitle = defaults.string(forKey: titleKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let defaultsTitle, !defaultsTitle.isEmpty {
+            return defaultsTitle
+        }
+        guard let fileTitle = try? String(contentsOf: titleFileURL, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !fileTitle.isEmpty else {
+            return nil
+        }
+        return fileTitle
+    }
+
+    static func persistTitle(_ title: String?) {
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            defaults.set(trimmed, forKey: titleKey)
+            try? trimmed.write(to: titleFileURL, atomically: true, encoding: .utf8)
+        } else {
+            defaults.removeObject(forKey: titleKey)
+            try? FileManager.default.removeItem(at: titleFileURL)
+        }
+        defaults.synchronize()
+    }
 }
 
 // MARK: - Recents (최근 재생)
@@ -124,10 +166,16 @@ final class RecentsStore: ObservableObject {
         push(RecentItem(kind: .fileGroup, value: first, addedAt: Date(), title: nil, paths: paths))
     }
 
-    func addURL(_ urlString: String) {
+    func addURL(_ urlString: String, title: String? = nil) {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        push(RecentItem(kind: .url, value: trimmed, addedAt: Date(), title: nil))
+        let normalizedTitle = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        push(RecentItem(
+            kind: .url,
+            value: trimmed,
+            addedAt: Date(),
+            title: (normalizedTitle?.isEmpty == false) ? normalizedTitle : nil
+        ))
     }
 
     /// 누락된 파일을 리스트에서 제거. 클릭 시 파일 존재 확인 실패 경로에서 호출.
@@ -177,6 +225,9 @@ struct HurstApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(recents)
+                .onOpenURL { incomingURL in
+                    AppDelegate.handleIncomingURLs([incomingURL])
+                }
         }
         .windowStyle(.hiddenTitleBar)
 
@@ -217,7 +268,8 @@ struct HurstApp: App {
                                     userInfo: [
                                         "kind":  item.kind.rawValue,
                                         "value": item.value,
-                                        "paths": item.paths ?? []
+                                        "paths": item.paths ?? [],
+                                        "title": item.title ?? ""
                                     ]
                                 )
                             }
@@ -269,12 +321,93 @@ struct HurstApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    @MainActor
+    static func applyStyleToCurrentWindowIfNeeded() {
+        if let window = NSApplication.shared.keyWindow
+            ?? NSApplication.shared.mainWindow
+            ?? NSApplication.shared.windows.first(where: { $0.contentView != nil }) {
+            applyStyle(window)
+        }
+        applyStyleToAllWindows()
+    }
+
+    @MainActor
+    static func applyStyleToAllWindows() {
+        for window in NSApplication.shared.windows {
+            applyStyle(window)
+        }
+    }
+
+    static func queueExternalMediaOpenRequest(_ request: ExternalMediaOpenRequest) {
+        let defaults = PendingExternalMediaOpenStore.defaults
+        defaults.set(request.url, forKey: PendingExternalMediaOpenStore.urlKey)
+        if let displayTitle = request.displayTitle, !displayTitle.isEmpty {
+            PendingExternalMediaOpenStore.persistTitle(displayTitle)
+        } else if let existingTitle = PendingExternalMediaOpenStore.persistedTitle() {
+            PendingExternalMediaOpenStore.persistTitle(existingTitle)
+        } else {
+            PendingExternalMediaOpenStore.persistTitle(nil)
+        }
+        defaults.synchronize()
+    }
+
+    static func pendingExternalMediaOpenRequest() -> ExternalMediaOpenRequest? {
+        let defaults = PendingExternalMediaOpenStore.defaults
+        defaults.synchronize()
+        guard let url = defaults.string(forKey: PendingExternalMediaOpenStore.urlKey)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !url.isEmpty else {
+            return nil
+        }
+        let displayTitle = PendingExternalMediaOpenStore.persistedTitle()
+        return ExternalMediaOpenRequest(
+            url: url,
+            displayTitle: (displayTitle?.isEmpty == false) ? displayTitle : nil
+        )
+    }
+
+    static func pendingExternalDisplayTitle() -> String? {
+        PendingExternalMediaOpenStore.persistedTitle()
+    }
+
+    static func clearPendingExternalMediaOpenRequest() {
+        let defaults = PendingExternalMediaOpenStore.defaults
+        defaults.removeObject(forKey: PendingExternalMediaOpenStore.urlKey)
+        PendingExternalMediaOpenStore.persistTitle(nil)
+        defaults.synchronize()
+    }
+
+    static func postExternalMediaOpenRequest(_ request: ExternalMediaOpenRequest) {
+        var userInfo: [String: Any] = ["url": request.url]
+        if let displayTitle = request.displayTitle {
+            userInfo["displayTitle"] = displayTitle
+        }
+        NotificationCenter.default.post(
+            name: .externalOpenMediaURL,
+            object: nil,
+            userInfo: userInfo
+        )
+    }
+
+    @discardableResult
+    static func deliverPendingExternalMediaOpenRequestIfPossible() -> Bool {
+        guard NSApp.windows.first?.contentView != nil,
+              let request = pendingExternalMediaOpenRequest() else {
+            return false
+        }
+        Task { @MainActor in
+            applyStyleToCurrentWindowIfNeeded()
+        }
+        clearPendingExternalMediaOpenRequest()
+        postExternalMediaOpenRequest(request)
+        return true
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.main.async {
             guard let window = NSApplication.shared.windows.first else { return }
             window.delegate = self
-            self.applyStyle(window)
+            Self.applyStyle(window)
             // 매 실행마다 480x320으로 시작. 창은 화면 중앙에 배치.
             let size = CGSize(width: 480, height: 320)
             if let screen = NSScreen.main {
@@ -288,11 +421,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 window.setContentSize(size)
                 window.center()
             }
+            _ = Self.deliverPendingExternalMediaOpenRequestIfPossible()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                Self.applyStyleToAllWindows()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                Self.applyStyleToAllWindows()
+            }
         }
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
-        if let window = notification.object as? NSWindow { applyStyle(window) }
+        if let window = notification.object as? NSWindow { Self.applyStyle(window) }
     }
 
     func windowDidResize(_ notification: Notification) {
@@ -314,7 +454,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    func applyStyle(_ window: NSWindow) {
+    static func applyStyle(_ window: NSWindow) {
         // .titled를 유지해야 키보드(엔터, 스페이스바 등) 이벤트와 키 윈도우 포커스가 정상 작동합니다.
         var newStyleMask: NSWindow.StyleMask = [.titled, .fullSizeContentView, .resizable]
         if window.styleMask.contains(.fullScreen) {
@@ -359,7 +499,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private static func injectedMediaURL(from incomingURL: URL) -> String? {
+    static func injectedMediaURL(from incomingURL: URL) -> ExternalMediaOpenRequest? {
         guard incomingURL.scheme?.lowercased() == "04dopl" else { return nil }
         guard let components = URLComponents(url: incomingURL, resolvingAgainstBaseURL: false),
               let value = components.queryItems?.first(where: { $0.name == "url" })?.value?
@@ -367,18 +507,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
               !value.isEmpty else {
             return nil
         }
-        return value
+        let displayTitle = components.queryItems?.first(where: { $0.name == "title" })?.value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return ExternalMediaOpenRequest(
+            url: value,
+            displayTitle: (displayTitle?.isEmpty == false) ? displayTitle : nil
+        )
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    static func mediaOpenRequest(from value: String, displayTitle: String?) -> ExternalMediaOpenRequest? {
+        let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedValue.isEmpty else { return nil }
+        if let incomingURL = URL(string: trimmedValue),
+           let injectedRequest = injectedMediaURL(from: incomingURL) {
+            return injectedRequest
+        }
+        let normalizedTitle = displayTitle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ExternalMediaOpenRequest(
+            url: trimmedValue,
+            displayTitle: (normalizedTitle?.isEmpty == false) ? normalizedTitle : nil
+        )
+    }
 
-    /// Finder "Open With…" / 파일 더블클릭 / `open` 커맨드 / 커스텀 URL 스킴 진입점.
-    /// 파일 URL 은 플레이리스트 로직으로, 앱 전용 스킴은 직접 재생 가능한 미디어 URL 문자열로 브로드캐스트한다.
-    /// 앱 기동 중이면 `applicationDidFinishLaunching` 이후 ContentView 가 observer 를
-    /// 등록하기 전일 수 있어, 짧게 딜레이 후 post.
-    func application(_ application: NSApplication, open urls: [URL]) {
+    static func handleIncomingURLs(_ urls: [URL]) {
         let fileURLs = urls.filter(\.isFileURL)
-        let mediaURLs = urls.compactMap(Self.injectedMediaURL(from:))
+        let mediaRequests = urls.compactMap(Self.injectedMediaURL(from:))
+
+        guard !fileURLs.isEmpty || !mediaRequests.isEmpty else { return }
 
         let post: () -> Void = {
             if !fileURLs.isEmpty {
@@ -388,19 +543,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     userInfo: ["urls": fileURLs]
                 )
             }
-            for mediaURL in mediaURLs {
-                NotificationCenter.default.post(
-                    name: .externalOpenMediaURL,
-                    object: nil,
-                    userInfo: ["url": mediaURL]
-                )
+            for request in mediaRequests {
+                queueExternalMediaOpenRequest(request)
+                _ = deliverPendingExternalMediaOpenRequestIfPossible()
             }
         }
+
         if NSApp.windows.first?.contentView != nil {
             post()
         } else {
             // 콜드 기동: ContentView 가 onReceive 등록을 마칠 때까지 한 틱 대기.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: post)
         }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Finder "Open With…" / 파일 더블클릭 / `open` 커맨드 / 커스텀 URL 스킴 진입점.
+    /// 파일 URL 은 플레이리스트 로직으로, 앱 전용 스킴은 직접 재생 가능한 미디어 URL 문자열로 브로드캐스트한다.
+    /// 앱 기동 중이면 `applicationDidFinishLaunching` 이후 ContentView 가 observer 를
+    /// 등록하기 전일 수 있어, 짧게 딜레이 후 post.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        Self.handleIncomingURLs(urls)
     }
 }
