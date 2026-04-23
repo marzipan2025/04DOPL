@@ -6,9 +6,7 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
         let view = NSView()
         DispatchQueue.main.async {
             guard let window = view.window else { return }
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.isMovableByWindowBackground = true
+            AppDelegate.restoreSettingsWindowStyle(window)
             window.minSize = NSSize(width: 640, height: 460)
             window.setContentSize(NSSize(
                 width: max(window.frame.width, 640),
@@ -21,9 +19,7 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         DispatchQueue.main.async {
             guard let window = nsView.window else { return }
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.isMovableByWindowBackground = true
+            AppDelegate.restoreSettingsWindowStyle(window)
             window.minSize = NSSize(width: 640, height: 460)
         }
     }
@@ -102,6 +98,7 @@ struct SettingsWindowView: View {
 
                             Spacer()
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 8)
                         .background {
@@ -112,6 +109,7 @@ struct SettingsWindowView: View {
                                     : .clear
                                 )
                         }
+                        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     .buttonStyle(.plain)
                 }
@@ -136,10 +134,10 @@ struct SettingsWindowView: View {
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .fill(tab.color.gradient)
                             Image(systemName: tab.icon)
-                                .font(.system(size: 15, weight: .semibold))
+                                .font(.system(size: 26, weight: .semibold))
                                 .foregroundStyle(.white)
                         }
-                        .frame(width: 36, height: 36)
+                        .frame(width: 64, height: 64)
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text(tab.rawValue)
@@ -161,6 +159,7 @@ struct SettingsWindowView: View {
                         AppearanceSettingsView()
                     }
                 }
+                .padding(.top, -18)
                 .padding(.horizontal, 28)
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity, alignment: .leading)

@@ -321,11 +321,22 @@ struct HurstApp: App {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+    static let settingsWindowIdentifier = NSUserInterfaceItemIdentifier("settings-window")
+
+    static func isSettingsWindow(_ window: NSWindow) -> Bool {
+        window.identifier == settingsWindowIdentifier
+    }
+
+    static func isPlaybackWindow(_ window: NSWindow) -> Bool {
+        !isSettingsWindow(window) && window.contentView != nil
+    }
+
     @MainActor
     static func applyStyleToCurrentWindowIfNeeded() {
         if let window = NSApplication.shared.keyWindow
             ?? NSApplication.shared.mainWindow
-            ?? NSApplication.shared.windows.first(where: { $0.contentView != nil }) {
+            ?? NSApplication.shared.windows.first(where: isPlaybackWindow) {
+            guard isPlaybackWindow(window) else { return }
             applyStyle(window)
         }
         applyStyleToAllWindows()
@@ -333,7 +344,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @MainActor
     static func applyStyleToAllWindows() {
-        for window in NSApplication.shared.windows {
+        for window in NSApplication.shared.windows where isPlaybackWindow(window) {
             applyStyle(window)
         }
     }
@@ -405,7 +416,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.main.async {
-            guard let window = NSApplication.shared.windows.first else { return }
+            guard let window = NSApplication.shared.windows.first(where: Self.isPlaybackWindow) else { return }
             window.delegate = self
             Self.applyStyle(window)
             // 매 실행마다 480x320으로 시작. 창은 화면 중앙에 배치.
@@ -432,11 +443,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
-        if let window = notification.object as? NSWindow { Self.applyStyle(window) }
+        if let window = notification.object as? NSWindow, Self.isPlaybackWindow(window) {
+            Self.applyStyle(window)
+        }
     }
 
     func windowDidResize(_ notification: Notification) {
-        if let window = notification.object as? NSWindow, let cv = window.contentView {
+        if let window = notification.object as? NSWindow,
+           Self.isPlaybackWindow(window),
+           let cv = window.contentView {
             cv.layer?.backgroundColor = .clear
             cv.layer?.cornerRadius = 32
             cv.layer?.masksToBounds = true
@@ -454,7 +469,37 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    static func restoreSettingsWindowStyle(_ window: NSWindow) {
+        window.identifier = settingsWindowIdentifier
+        window.styleMask.insert([.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView])
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.isOpaque = false
+        window.backgroundColor = NSColor.windowBackgroundColor
+        window.hasShadow = true
+        window.collectionBehavior.remove(.fullScreenPrimary)
+
+        window.standardWindowButton(.closeButton)?.isHidden = false
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = false
+        window.standardWindowButton(.zoomButton)?.isHidden = false
+
+        if let cv = window.contentView {
+            cv.wantsLayer = true
+            cv.layer?.backgroundColor = NSColor.clear.cgColor
+            cv.layer?.cornerRadius = 0
+            cv.layer?.masksToBounds = false
+
+            if let themeFrame = cv.superview {
+                themeFrame.wantsLayer = true
+                themeFrame.layer?.cornerRadius = 0
+                themeFrame.layer?.masksToBounds = false
+            }
+        }
+    }
+
     static func applyStyle(_ window: NSWindow) {
+        guard isPlaybackWindow(window) else { return }
         // .titled를 유지해야 키보드(엔터, 스페이스바 등) 이벤트와 키 윈도우 포커스가 정상 작동합니다.
         var newStyleMask: NSWindow.StyleMask = [.titled, .fullSizeContentView, .resizable]
         if window.styleMask.contains(.fullScreen) {

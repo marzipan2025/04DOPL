@@ -1905,6 +1905,10 @@ struct ContentView: View {
     /// 평시(재생) 모드 키 처리.
     private func handlePlaybackKey(_ event: NSEvent) -> NSEvent? {
         if event.modifierFlags.contains(.command) {
+            if event.keyCode == 35 { // ⌘P
+                openSubtitleFile()
+                return nil
+            }
             return event
         }
 
@@ -1975,10 +1979,7 @@ struct ContentView: View {
             }
             return nil
         case 11:       cycleBackgroundStyle();        return nil            // b
-        case 35:                                                             // p / ⌘P
-            if event.modifierFlags.contains(.command) {
-                openSubtitleFile(); return nil                               // ⌘P  외부 자막 파일 열기
-            }
+        case 35:                                                             // p
             toggleSubtitlesWithLabel(); return nil                           // p   캡션 온/오프
         case 33:       sampler.decreaseSubtitleSize(); return nil           // [
         case 30:       sampler.increaseSubtitleSize(); return nil           // ]

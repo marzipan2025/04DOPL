@@ -1,0 +1,13 @@
+.DS_Store
+.claude/
+
+build_output/
+build_verify*/
+Releases/
+
+Hurst.xcodeproj/xcuserdata/
+Hurst.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate
+
+DevTools/test_gesture
+DevTools/Samples/test_wma_output.mp4
