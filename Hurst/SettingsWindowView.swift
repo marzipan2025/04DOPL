@@ -1,6 +1,8 @@
 import SwiftUI
 import AppKit
 
+private let settingsPanelBackground = Color(nsColor: NSColor(calibratedWhite: 0.96, alpha: 1.0))
+
 private struct SettingsWindowConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -31,7 +33,7 @@ struct SettingsWindowView: View {
     enum SettingsTab: String, CaseIterable, Identifiable {
         case general = "General"
         case playback = "Playback"
-        case appearance = "Appearance"
+        case licences = "Licences"
         
         var id: String { self.rawValue }
         
@@ -39,7 +41,7 @@ struct SettingsWindowView: View {
             switch self {
             case .general:    return "gearshape.fill"
             case .playback:   return "play.rectangle.fill"
-            case .appearance: return "paintbrush.fill"
+            case .licences:   return "doc.text.fill"
             }
         }
         
@@ -47,7 +49,7 @@ struct SettingsWindowView: View {
             switch self {
             case .general:    return .purple
             case .playback:   return .blue
-            case .appearance: return .orange
+            case .licences:   return .orange
             }
         }
     }
@@ -155,8 +157,8 @@ struct SettingsWindowView: View {
                         GeneralSettingsView()
                     case .playback:
                         PlaybackSettingsView()
-                    case .appearance:
-                        AppearanceSettingsView()
+                    case .licences:
+                        LicencesSettingsView()
                     }
                 }
                 .padding(.top, -18)
@@ -177,9 +179,9 @@ private extension SettingsWindowView.SettingsTab {
         case .general:
             return "Core app behavior and launch defaults"
         case .playback:
-            return "Video speed and playback tuning"
-        case .appearance:
-            return "Theme and visual presentation"
+            return "Playback behavior and peek controls"
+        case .licences:
+            return "Third-party notices and license information"
         }
     }
 }
@@ -191,7 +193,7 @@ struct SettingsSection<Content: View>: View {
     
     init(
         _ title: String,
-        backgroundColor: Color = Color(nsColor: NSColor(calibratedWhite: 0.96, alpha: 1.0)),
+        backgroundColor: Color = settingsPanelBackground,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -301,22 +303,66 @@ struct PlaybackSettingsView: View {
     }
 }
 
-struct AppearanceSettingsView: View {
-    @AppStorage("preferredAppearance") private var preferredAppearance = 0 
-    
+struct LicencesSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            SettingsSection("Theme") {
-                SettingsRow("Appearance", showDivider: false) {
-                    Picker("", selection: $preferredAppearance) {
-                        Text("Auto").tag(0)
-                        Text("Light").tag(1)
-                        Text("Dark").tag(2)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 180)
+            VStack(alignment: .leading, spacing: 0) {
+                ScrollView {
+                    Text(Self.licenseText)
+                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(18)
                 }
+                .frame(maxWidth: .infinity, minHeight: 320, maxHeight: 320)
             }
+            .background(settingsPanelBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+            )
         }
     }
+
+    private static let licenseText = """
+    04dopl third-party notices
+
+    FFmpeg
+    License: GPL-3.0-or-later
+    Website: https://ffmpeg.org
+    Bundled use: media probing, remuxing, and fallback transcoding for formats not handled directly by AVFoundation.
+
+    FFmpeg libraries bundled in this app
+    - libavdevice.62.dylib
+    - libavfilter.11.dylib
+    - libavformat.62.dylib
+    - libavcodec.62.dylib
+    - libswresample.6.dylib
+    - libswscale.9.dylib
+    - libavutil.60.dylib
+
+    Additional bundled media libraries
+    - libvmaf: BSD-2-Clause-Patent
+    - OpenSSL 3: Apache-2.0
+    - libvpx: BSD-3-Clause
+    - dav1d: BSD-2-Clause
+    - LAME: LGPL-2.0-or-later
+    - Opus: BSD-3-Clause
+    - SVT-AV1: BSD-3-Clause
+    - x264: GPL-2.0-or-later
+    - x265: GPL-2.0-or-later
+
+    BPdots Unicase font family
+    Copyright (c) 2007 George Triantafyllakos. All rights reserved.
+    Website: http://www.backpacker.gr
+    Bundled files:
+    - bpdots.unicase-regular.otf
+    - bpdots.unicase-light.otf
+    - bpdots.unicase-bold.otf
+
+    Apple frameworks
+    This app also uses system frameworks provided by macOS, including SwiftUI, AppKit, AVFoundation, WebKit, UniformTypeIdentifiers, and Accelerate.
+    """
 }
