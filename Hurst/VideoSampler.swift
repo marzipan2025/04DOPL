@@ -67,7 +67,7 @@ class VideoSampler: ObservableObject {
     @Published var overlayEffect: OverlayEffect = .none
     @Published var overlayProgress: Double = 0.0
     @Published var overlayBlinks: Int = 1
-    @Published var overlayIsAlert: Bool = false   // 한계치 도달 시 true → 핑크로 강제
+    @Published var overlayIsAlert: Bool = false   // 한계치 도달 시 true -> 악센트 색상으로 강제
     private var overlayStartTime: Date?
     private let overlayDuration: TimeInterval = 0.5
 
@@ -988,7 +988,7 @@ class VideoSampler: ObservableObject {
 
     // MARK: - Overlay
 
-    /// 플레이리스트 경계(처음/마지막)에서 더 이상 이동할 수 없을 때 핑크 테두리 깜빡임.
+    /// 플레이리스트 경계(처음/마지막)에서 더 이상 이동할 수 없을 때 악센트 테두리 깜빡임.
     func triggerBorderBlink() {
         startTimerIfNeeded()
         showOverlay(.border, blinks: 2, alert: true)
@@ -1081,7 +1081,7 @@ class VideoSampler: ObservableObject {
     }
 
     /// 오디오 모드에서 호출: 일반적인 바 형태의 이퀄라이저 렌더링.
-    /// 배경은 디폴트 C9CFE5 색상을, 바(세로줄)는 우리가 자주 사용하는 핑크색(#FF2A6D 계열) 사용.
+    /// 배경은 디폴트 C9CFE5 색상을, 바(세로줄)는 사용자가 고른 악센트 색상 사용.
     private func generateAudioDotColors() {
         guard let player else { return }
         let currentTime = max(0, player.currentTime().seconds)
@@ -1132,7 +1132,7 @@ class VideoSampler: ObservableObject {
 
         // 지정색상 (배경 점들은 외부에서 정해진 backgroundDotAlpha 적용)
         let baseBg = NSColor(red: 201.0/255.0, green: 207.0/255.0, blue: 229.0/255.0, alpha: CGFloat(self.backgroundDotAlpha)).cgColor
-        let pinkC  = NSColor(red: 1.0, green: 0.16, blue: 0.53, alpha: 1.0).cgColor
+        let accentColor = AppAccentColor.current.nsColor.cgColor
 
         for row in 0..<rows {
             var rowColors: [CGColor] = []
@@ -1144,7 +1144,7 @@ class VideoSampler: ObservableObject {
                 let h = barHeights[col]
                 // barHeights가 0이면 불 안 들어옴. rows이면 꽉 참.
                 if row >= rows - h {
-                    rowColors.append(pinkC)
+                    rowColors.append(accentColor)
                 } else {
                     rowColors.append(baseBg)
                 }

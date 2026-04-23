@@ -262,6 +262,7 @@ struct SettingsRow<Content: View>: View {
 struct GeneralSettingsView: View {
     @AppStorage("autoPlayOnOpen") private var autoPlayOnOpen = true
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = true
+    @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -271,13 +272,55 @@ struct GeneralSettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
-                SettingsRow("Remember Playback Position", showDivider: false) {
+                SettingsRow("Remember Playback Position") {
                     Toggle("", isOn: $rememberPlaybackPosition)
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
+                SettingsRow("Accent Color", showDivider: false, extraVerticalPadding: 8) {
+                    HStack(spacing: 10) {
+                        ForEach(AppAccentColor.allCases) { choice in
+                            AccentColorSwatch(
+                                choice: choice,
+                                isSelected: AppAccentColor.choice(for: accentColorRaw) == choice
+                            ) {
+                                accentColorRaw = choice.rawValue
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+}
+
+private struct AccentColorSwatch: View {
+    let choice: AppAccentColor
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(choice.color)
+
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(choice.checkmarkColor)
+                }
+            }
+            .frame(width: 30, height: 30)
+            .overlay(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(isSelected ? Color.primary.opacity(0.65) : Color.primary.opacity(0.12), lineWidth: isSelected ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(choice.label)
+        .accessibilityLabel(choice.label)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 }
 

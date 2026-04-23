@@ -201,7 +201,53 @@ private struct MenuCommandObservers: ViewModifier {
 // MARK: - Overlay colors
 
 private let indicatorColorPlay  = Color.white                                        // 흰색 100%
-private let indicatorColorPause = Color(red: 1.0, green: 0.16, blue: 0.53)           // #FF2987
+
+enum AppAccentColor: String, CaseIterable, Identifiable {
+    static let storageKey = "04dopl.accentColor"
+    static let defaultChoice: AppAccentColor = .pink
+
+    case pink
+    case blue
+    case yellow
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .pink: return "Pink"
+        case .blue: return "Blue"
+        case .yellow: return "Yellow"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .pink: return Color(red: 255.0/255.0, green: 41.0/255.0, blue: 135.0/255.0)   // #FF2987
+        case .blue: return Color(red: 41.0/255.0, green: 70.0/255.0, blue: 255.0/255.0)    // #2946FF
+        case .yellow: return Color(red: 249.0/255.0, green: 255.0/255.0, blue: 48.0/255.0) // #F9FF30
+        }
+    }
+
+    var nsColor: NSColor {
+        switch self {
+        case .pink: return NSColor(red: 255.0/255.0, green: 41.0/255.0, blue: 135.0/255.0, alpha: 1)
+        case .blue: return NSColor(red: 41.0/255.0, green: 70.0/255.0, blue: 255.0/255.0, alpha: 1)
+        case .yellow: return NSColor(red: 249.0/255.0, green: 255.0/255.0, blue: 48.0/255.0, alpha: 1)
+        }
+    }
+
+    var checkmarkColor: Color {
+        self == .yellow ? .black : .white
+    }
+
+    static func choice(for rawValue: String) -> AppAccentColor {
+        AppAccentColor(rawValue: rawValue) ?? defaultChoice
+    }
+
+    static var current: AppAccentColor {
+        choice(for: UserDefaults.standard.string(forKey: storageKey) ?? defaultChoice.rawValue)
+    }
+}
 
 /// 자막 폰트 크기에 따라 적절한 폰트 웨이트를 반환.
 /// 작은 크기는 Bold 로 가독성 확보, 큰 크기는 Light 로 과중량 방지, 중간은 Regular.
@@ -322,14 +368,14 @@ private struct RemuxingIndicator: View {
     let dotDiameter: CGFloat
     let gap: CGFloat
     let count: Int
+    let accentColor: Color
     @State private var activeIndex = 0
-    private let dotColor = Color(red: 1.0, green: 0.16, blue: 0.53)  // #FF2987
 
     var body: some View {
         HStack(spacing: gap) {
             ForEach(0..<count, id: \.self) { i in
                 Circle()
-                    .fill(i == activeIndex ? dotColor : dotColor.opacity(0.15))
+                    .fill(i == activeIndex ? accentColor : accentColor.opacity(0.15))
                     .frame(width: dotDiameter, height: dotDiameter)
                     .animation(.easeInOut(duration: 0.2), value: activeIndex)
             }
@@ -532,6 +578,7 @@ private struct DotsOverlayView: View {
     let playbackInfoActive: Bool
     /// 피크 중엔 도트를 전부 스킵(실제 영상이 뒤에서 보이도록). 자막/레이블은 그대로 렌더.
     let isPeeking: Bool
+    let accentColor: Color
 
     var body: some View {
         Canvas { context, size in
@@ -719,7 +766,7 @@ private struct DotsOverlayView: View {
             : backgroundStyle.hasBlackOverlay
         let overlayColor: Color
         if backgroundStyleLabel != nil {
-            overlayColor = indicatorColorPause
+            overlayColor = accentColor
         } else if isPlaceholder {
             if isEditingURL || subtitlePromptActive {
                 // 대기화면에서 URL 편집/자막 프롬프트 시 버튼(X, GO 등)과 동일한 색상 사용
@@ -930,7 +977,7 @@ private struct DotsOverlayView: View {
             isOverlayDot(effect: effect, row: row, col: col,
                          totalRows: totalRows, totalCols: totalCols) {
             let pause = sampler.overlayIsAlert || !sampler.isPlaying
-            return pause ? indicatorColorPause : indicatorColorPlay
+            return pause ? accentColor : indicatorColorPlay
         }
         
         if isPlaceholder { return placeholderColor }
@@ -1000,12 +1047,13 @@ struct ContentView: View {
     @State private var playlistIndex: Int = 0
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
+    @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @AppStorage("04dopl.backgroundStyle") private var backgroundStyleRaw: Int = BackgroundStyle.blur.rawValue
     /// 풀스크린 전용 배경 모드. 일반 모드와 독립적으로 영속.
     @AppStorage("04dopl.fullscreenBackgroundStyle") private var fullscreenBackgroundStyleRaw: Int = FullscreenBackgroundStyle.black.rawValue
     @State private var backgroundStyleLabel: String? = nil
     @State private var backgroundStyleLabelTask: Task<Void, Never>? = nil
-    /// 대기 상태에서 파일 드래그 호버 중일 때 true. 핑크 테두리 시각 피드백용.
+    /// 대기 상태에서 파일 드래그 호버 중일 때 true. 악센트 테두리 시각 피드백용.
     @State private var isDropTargeted = false
 
     /// 파일 열기 시 창 자동 리사이즈 대기 플래그.
@@ -1030,6 +1078,10 @@ struct ContentView: View {
 
     private var fullscreenBackgroundStyle: FullscreenBackgroundStyle {
         FullscreenBackgroundStyle(rawValue: fullscreenBackgroundStyleRaw) ?? .black
+    }
+
+    private var accentColor: Color {
+        AppAccentColor.choice(for: accentColorRaw).color
     }
 
     /// 피크 가능 조건: 실제 영상이 로드되어 있고, URL 편집 중이 아니며, 로딩 중이 아님.
@@ -1216,7 +1268,8 @@ struct ContentView: View {
                     RemuxingIndicator(
                         dotDiameter: sampler.dotDiameter,
                         gap: g - sampler.dotDiameter,
-                        count: count
+                        count: count,
+                        accentColor: accentColor
                     )
                     .position(x: geo.size.width / 2, y: geo.size.height / 2)
                 }
@@ -1242,7 +1295,8 @@ struct ContentView: View {
                 subtitlePromptActive: subtitlePromptURL != nil,
                 playbackInfoTitle: currentPlaybackInfoTitle,
                 playbackInfoActive: isShowingPlaybackInfo,
-                isPeeking: isPeeking
+                isPeeking: isPeeking,
+                accentColor: accentColor
             )
 
             // URL 편집 모드: "CANCEL"/"X  GO" 클릭 히트박스 (투명).
@@ -1269,22 +1323,22 @@ struct ContentView: View {
                 }
             }
 
-            // Always on Top 표시: 2px 여백 + 1px 핑크 테두리.
+            // Always on Top 표시: 2px 여백 + 1px 악센트 테두리.
             // 앱 라운딩(32pt)과 동심원으로, 창 안쪽 2.5pt(= 2px gap + 0.5px 선 반폭) 위치에 렌더.
             if isAlwaysOnTop && !isFullscreen {
                 // 창 CALayer 코너는 circular arc(기본값). style 지정 없이 동일하게 맞춤.
                 // 선 중심 = 가장자리에서 2.5pt 안쪽 → 코너 반경 = 32 − 2.5 = 29.5pt.
                 RoundedRectangle(cornerRadius: 29.5)
-                    .stroke(Color(red: 1.0, green: 0.16, blue: 0.53), lineWidth: 1)
+                    .stroke(accentColor, lineWidth: 1)
                     .padding(2.5)
                     .allowsHitTesting(false)
             }
 
-            // 드롭 타겟 피드백: 드래그 호버 중일 때 1px 핑크 테두리 (대기/재생 모두).
+            // 드롭 타겟 피드백: 드래그 호버 중일 때 1px 악센트 테두리 (대기/재생 모두).
             // Always on Top 표시와 동일한 기하(padding 2.5 / radius 29.5)로 겹쳐도 위화감 없음.
             if isDropTargeted && !isFullscreen {
                 RoundedRectangle(cornerRadius: 29.5)
-                    .stroke(Color(red: 1.0, green: 0.16, blue: 0.53), lineWidth: 1)
+                    .stroke(accentColor, lineWidth: 1)
                     .padding(2.5)
                     .allowsHitTesting(false)
             }
@@ -1499,12 +1553,12 @@ struct ContentView: View {
         return srtMatch ?? smiMatch
     }
 
-    /// 사용자가 USE 수락 → 자막 로드. 실패 시 기존 핑크 레이블로 알림.
+    /// 사용자가 USE 수락 → 자막 로드. 실패 시 기존 악센트 레이블로 알림.
     private func acceptSubtitlePrompt() {
         guard let url = subtitlePromptURL else { return }
         subtitlePromptURL = nil
         if !sampler.loadExternalSubtitle(url: url) {
-            showTransientPinkLabel("SUBTITLE LOAD FAILED")
+            showTransientAccentLabel("SUBTITLE LOAD FAILED")
         }
     }
 
@@ -1634,7 +1688,7 @@ struct ContentView: View {
         }
     }
 
-    /// Shift+← : 이전 파일. 없으면 핑크 깜빡임.
+    /// Shift+← : 이전 파일. 없으면 악센트 깜빡임.
     private func playlistPrev() {
         guard !playlist.isEmpty else { 
             sampler.triggerBorderBlink()
@@ -1648,7 +1702,7 @@ struct ContentView: View {
         }
     }
 
-    /// Shift+→ : 다음 파일. 없으면 핑크 깜빡임.
+    /// Shift+→ : 다음 파일. 없으면 악센트 깜빡임.
     private func playlistNext() {
         guard !playlist.isEmpty else { 
             sampler.triggerBorderBlink()
@@ -2038,9 +2092,9 @@ struct ContentView: View {
 
     // MARK: 전역 트랜지언트 레이블
 
-    /// 자막 파이프라인을 타고 0.6초간 노출되는 핑크 레이블.
+    /// 자막 파이프라인을 타고 0.6초간 노출되는 악센트 레이블.
     /// 모드 변경, 자막 OFF 등 일시적 알림에 공용.
-    private func showTransientPinkLabel(_ text: String) {
+    private func showTransientAccentLabel(_ text: String) {
         backgroundStyleLabel = text
         backgroundStyleLabelTask?.cancel()
         backgroundStyleLabelTask = Task { @MainActor in
@@ -2153,21 +2207,21 @@ struct ContentView: View {
         if isFullscreen {
             let next = fullscreenBackgroundStyle.next
             fullscreenBackgroundStyleRaw = next.rawValue
-            showTransientPinkLabel(next.displayName)
+            showTransientAccentLabel(next.displayName)
         } else {
             let next = backgroundStyle.next
             backgroundStyleRaw = next.rawValue
-            showTransientPinkLabel(next.displayName)
+            showTransientAccentLabel(next.displayName)
         }
     }
 
-    /// c: 자막 토글. 트랙이 있고 ON→OFF일 때만 CAPTION OFF 핑크 레이블.
+    /// c: 자막 토글. 트랙이 있고 ON→OFF일 때만 CAPTION OFF 악센트 레이블.
     private func toggleSubtitlesWithLabel() {
         let hadTrack = sampler.hasSubtitles
         let wasOn = sampler.showSubtitles
         sampler.toggleSubtitles()
         if hadTrack && wasOn && !sampler.showSubtitles {
-            showTransientPinkLabel("CAPTION OFF")
+            showTransientAccentLabel("CAPTION OFF")
         }
     }
 
@@ -2190,7 +2244,7 @@ struct ContentView: View {
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         if !sampler.loadExternalSubtitle(url: url) {
-            showTransientPinkLabel("SUBTITLE LOAD FAILED")
+            showTransientAccentLabel("SUBTITLE LOAD FAILED")
         }
     }
 
