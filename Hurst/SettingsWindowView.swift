@@ -315,9 +315,9 @@ struct LicencesSettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 18)
                         .padding(.horizontal, 18)
-                        .padding(.bottom, 0)
+                        .padding(.bottom, 18)
                 }
-                .frame(maxWidth: .infinity, minHeight: 320, maxHeight: 320)
+                .frame(maxWidth: .infinity, minHeight: 330, maxHeight: 330)
             }
             .background(settingsPanelBackground)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
