@@ -310,14 +310,14 @@ private struct AccentColorSwatch: View {
 
                 if isSelected {
                     Circle()
-                        .stroke(Color.white, lineWidth: 1)
+                        .stroke(Color.white, lineWidth: 0.5)
                         .padding(4)
                 }
             }
             .frame(width: 28, height: 28)
             .overlay(
                 Circle()
-                    .stroke(isSelected ? choice.color.opacity(0.95) : Color.primary.opacity(0.14), lineWidth: isSelected ? 1 : 0.5)
+                    .stroke(Color.primary.opacity(0.14), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)

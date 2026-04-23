@@ -224,7 +224,7 @@ enum AppAccentColor: String, CaseIterable, Identifiable {
         switch self {
         case .pink: return Color(red: 255.0/255.0, green: 41.0/255.0, blue: 135.0/255.0)   // #FF2987
         case .blue: return Color(red: 41.0/255.0, green: 70.0/255.0, blue: 255.0/255.0)    // #2946FF
-        case .yellow: return Color(red: 249.0/255.0, green: 255.0/255.0, blue: 48.0/255.0) // #F9FF30
+        case .yellow: return Color(red: 255.0/255.0, green: 196.0/255.0, blue: 0.0/255.0)  // #FFC400
         }
     }
 
@@ -232,7 +232,7 @@ enum AppAccentColor: String, CaseIterable, Identifiable {
         switch self {
         case .pink: return NSColor(red: 255.0/255.0, green: 41.0/255.0, blue: 135.0/255.0, alpha: 1)
         case .blue: return NSColor(red: 41.0/255.0, green: 70.0/255.0, blue: 255.0/255.0, alpha: 1)
-        case .yellow: return NSColor(red: 249.0/255.0, green: 255.0/255.0, blue: 48.0/255.0, alpha: 1)
+        case .yellow: return NSColor(red: 255.0/255.0, green: 196.0/255.0, blue: 0.0/255.0, alpha: 1)
         }
     }
 
