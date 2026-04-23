@@ -3,6 +3,20 @@ import AppKit
 
 private let settingsPanelBackground = Color(nsColor: NSColor(calibratedWhite: 0.96, alpha: 1.0))
 
+private enum SettingsFont {
+    static func light(_ size: CGFloat) -> Font {
+        .custom("BPdotsUnicase-Light", size: size)
+    }
+
+    static func regular(_ size: CGFloat) -> Font {
+        .custom("BPdotsUnicase", size: size)
+    }
+
+    static func bold(_ size: CGFloat) -> Font {
+        .custom("BPdotsUnicase-Bold", size: size)
+    }
+}
+
 private struct SettingsWindowConfigurator: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
@@ -95,7 +109,7 @@ struct SettingsWindowView: View {
                             .frame(width: 24, height: 24)
 
                             Text(tab.rawValue)
-                                .font(.system(size: 13, weight: .medium))
+                                .font(SettingsFont.regular(14))
                                 .foregroundStyle(.primary)
 
                             Spacer()
@@ -143,10 +157,10 @@ struct SettingsWindowView: View {
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text(tab.rawValue)
-                                .font(.system(size: 22, weight: .bold))
+                                .font(SettingsFont.bold(26))
 
                             Text(tab.subtitle)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(SettingsFont.light(14))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -204,7 +218,7 @@ struct SettingsSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(SettingsFont.bold(14))
                 .foregroundColor(.secondary)
             
             VStack(spacing: 0) {
@@ -243,7 +257,7 @@ struct SettingsRow<Content: View>: View {
             HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label)
-                        .font(.system(size: 13, weight: .medium))
+                        .font(SettingsFont.regular(15))
                 }
                 Spacer()
                 content
@@ -355,7 +369,7 @@ struct LicencesSettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ScrollView {
                     Text(Self.licenseText)
-                        .font(.system(size: 12, weight: .regular, design: .monospaced))
+                        .font(SettingsFont.regular(12))
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
