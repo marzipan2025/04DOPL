@@ -313,7 +313,9 @@ struct LicencesSettingsView: View {
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(18)
+                        .padding(.top, 18)
+                        .padding(.horizontal, 18)
+                        .padding(.bottom, 18)
                 }
                 .frame(maxWidth: .infinity, minHeight: 320, maxHeight: 320)
             }
@@ -364,5 +366,11 @@ struct LicencesSettingsView: View {
 
     Apple frameworks
     This app also uses system frameworks provided by macOS, including SwiftUI, AppKit, AVFoundation, WebKit, UniformTypeIdentifiers, and Accelerate.
+
+    -----
+
+    If you believe any required notice or license information is missing, need support, or would like to discuss professional collaboration related to this app, please contact us through the project repository on GitHub:
+
+    https://github.com/marzipan2025/04DOPL
     """
 }
