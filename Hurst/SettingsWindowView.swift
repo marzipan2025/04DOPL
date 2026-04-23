@@ -272,7 +272,7 @@ struct GeneralSettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
-                SettingsRow("Remember Playback Position") {
+                SettingsRow("Remember Playback Position", showDivider: false) {
                     Toggle("", isOn: $rememberPlaybackPosition)
                         .labelsHidden()
                         .toggleStyle(.switch)
@@ -310,7 +310,7 @@ private struct AccentColorSwatch: View {
 
                 if isSelected {
                     Circle()
-                        .stroke(Color.white, lineWidth: 3)
+                        .stroke(Color.white, lineWidth: 1)
                         .padding(4)
                 }
             }
