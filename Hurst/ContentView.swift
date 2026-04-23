@@ -207,8 +207,8 @@ enum AppAccentColor: String, CaseIterable, Identifiable {
     static let defaultChoice: AppAccentColor = .pink
 
     case pink
-    case blue
     case yellow
+    case blue
 
     var id: String { rawValue }
 
@@ -234,10 +234,6 @@ enum AppAccentColor: String, CaseIterable, Identifiable {
         case .blue: return NSColor(red: 41.0/255.0, green: 70.0/255.0, blue: 255.0/255.0, alpha: 1)
         case .yellow: return NSColor(red: 249.0/255.0, green: 255.0/255.0, blue: 48.0/255.0, alpha: 1)
         }
-    }
-
-    var checkmarkColor: Color {
-        self == .yellow ? .black : .white
     }
 
     static func choice(for rawValue: String) -> AppAccentColor {

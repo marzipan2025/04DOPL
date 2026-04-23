@@ -277,8 +277,8 @@ struct GeneralSettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
-                SettingsRow("Accent Color", showDivider: false, extraVerticalPadding: 8) {
-                    HStack(spacing: 10) {
+                SettingsRow("Accent Color", showDivider: false, extraVerticalPadding: 4) {
+                    HStack(spacing: 13) {
                         ForEach(AppAccentColor.allCases) { choice in
                             AccentColorSwatch(
                                 choice: choice,
@@ -302,19 +302,19 @@ private struct AccentColorSwatch: View {
     var body: some View {
         Button(action: action) {
             ZStack {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                Circle()
                     .fill(choice.color)
 
                 if isSelected {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(choice.checkmarkColor)
+                    Circle()
+                        .stroke(Color.white, lineWidth: 3)
+                        .padding(4)
                 }
             }
-            .frame(width: 30, height: 30)
+            .frame(width: 28, height: 28)
             .overlay(
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .stroke(isSelected ? Color.primary.opacity(0.65) : Color.primary.opacity(0.12), lineWidth: isSelected ? 2 : 1)
+                Circle()
+                    .stroke(isSelected ? choice.color.opacity(0.95) : Color.primary.opacity(0.14), lineWidth: isSelected ? 2 : 1)
             )
         }
         .buttonStyle(.plain)
