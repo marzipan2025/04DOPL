@@ -1,7 +1,11 @@
 import SwiftUI
 import AppKit
 
-private let settingsPanelBackground = Color(nsColor: NSColor(calibratedWhite: 0.96, alpha: 1.0))
+private let settingsWindowBackground = Color(nsColor: NSColor(calibratedWhite: 0.07, alpha: 1.0))
+private let settingsSidebarBackground = Color(nsColor: NSColor(calibratedWhite: 0.11, alpha: 1.0))
+private let settingsPanelBackground = Color(nsColor: NSColor(calibratedWhite: 0.14, alpha: 1.0))
+private let settingsPanelStroke = Color.white.opacity(0.08)
+private let settingsDividerColor = Color.white.opacity(0.08)
 
 private enum SettingsFont {
     static func light(_ size: CGFloat) -> Font {
@@ -23,6 +27,8 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
         DispatchQueue.main.async {
             guard let window = view.window else { return }
             AppDelegate.restoreSettingsWindowStyle(window)
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.backgroundColor = NSColor(calibratedWhite: 0.07, alpha: 1.0)
             window.minSize = NSSize(width: 640, height: 460)
             window.setContentSize(NSSize(
                 width: max(window.frame.width, 640),
@@ -36,6 +42,8 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
         DispatchQueue.main.async {
             guard let window = nsView.window else { return }
             AppDelegate.restoreSettingsWindowStyle(window)
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.backgroundColor = NSColor(calibratedWhite: 0.07, alpha: 1.0)
             window.minSize = NSSize(width: 640, height: 460)
         }
     }
@@ -74,21 +82,15 @@ struct SettingsWindowView: View {
 
             HStack(spacing: 0) {
                 sidebar
-                Divider()
+                Rectangle()
+                    .fill(settingsDividerColor)
+                    .frame(width: 1)
                 detailPane
             }
         }
         .frame(minWidth: 640, minHeight: 460)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(nsColor: .underPageBackgroundColor),
-                    Color(nsColor: .windowBackgroundColor)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
+        .background(settingsWindowBackground)
+        .preferredColorScheme(.dark)
     }
 
     private var sidebar: some View {
@@ -121,7 +123,7 @@ struct SettingsWindowView: View {
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .fill(
                                     selectedTab == tab
-                                    ? Color.primary.opacity(0.09)
+                                    ? Color.white.opacity(0.12)
                                     : .clear
                                 )
                         }
@@ -137,7 +139,7 @@ struct SettingsWindowView: View {
         }
         .frame(width: 184)
         .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(.regularMaterial)
+        .background(settingsSidebarBackground)
     }
 
     @ViewBuilder
@@ -180,7 +182,7 @@ struct SettingsWindowView: View {
                 .padding(.bottom, 28)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(settingsWindowBackground)
         } else {
             ContentUnavailableView("Select a category", systemImage: "sidebar.left")
         }
@@ -228,7 +230,7 @@ struct SettingsSection<Content: View>: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    .stroke(settingsPanelStroke, lineWidth: 0.5)
             )
         }
     }
@@ -257,7 +259,7 @@ struct SettingsRow<Content: View>: View {
             HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label)
-                        .font(SettingsFont.regular(15))
+                        .font(SettingsFont.regular(16))
                 }
                 Spacer()
                 content
@@ -266,7 +268,9 @@ struct SettingsRow<Content: View>: View {
             .padding(.vertical, 11 + extraVerticalPadding)
             
             if showDivider {
-                Divider()
+                Rectangle()
+                    .fill(settingsDividerColor)
+                    .frame(height: 1)
                     .padding(.horizontal, 16)
             }
         }
@@ -369,7 +373,7 @@ struct LicencesSettingsView: View {
             VStack(alignment: .leading, spacing: 0) {
                 ScrollView {
                     Text(Self.licenseText)
-                        .font(SettingsFont.regular(12))
+                        .font(SettingsFont.regular(13))
                         .foregroundStyle(.primary)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -383,7 +387,7 @@ struct LicencesSettingsView: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    .stroke(settingsPanelStroke, lineWidth: 0.5)
             )
         }
     }
