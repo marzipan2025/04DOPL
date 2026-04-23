@@ -315,7 +315,7 @@ struct LicencesSettingsView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, 18)
                         .padding(.horizontal, 18)
-                        .padding(.bottom, 18)
+                        .padding(.bottom, 0)
                 }
                 .frame(maxWidth: .infinity, minHeight: 320, maxHeight: 320)
             }
