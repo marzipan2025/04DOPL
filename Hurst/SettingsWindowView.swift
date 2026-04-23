@@ -187,9 +187,15 @@ private extension SettingsWindowView.SettingsTab {
 struct SettingsSection<Content: View>: View {
     let title: String
     let content: Content
+    let backgroundColor: Color
     
-    init(_ title: String, @ViewBuilder content: () -> Content) {
+    init(
+        _ title: String,
+        backgroundColor: Color = Color(nsColor: .controlBackgroundColor).opacity(0.92),
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
+        self.backgroundColor = backgroundColor
         self.content = content()
     }
     
@@ -202,7 +208,7 @@ struct SettingsSection<Content: View>: View {
             VStack(spacing: 0) {
                 content
             }
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.92))
+            .background(backgroundColor)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -216,10 +222,17 @@ struct SettingsRow<Content: View>: View {
     let label: String
     let content: Content
     let showDivider: Bool
+    let extraVerticalPadding: CGFloat
     
-    init(_ label: String, showDivider: Bool = true, @ViewBuilder content: () -> Content) {
+    init(
+        _ label: String,
+        showDivider: Bool = true,
+        extraVerticalPadding: CGFloat = 0,
+        @ViewBuilder content: () -> Content
+    ) {
         self.label = label
         self.showDivider = showDivider
+        self.extraVerticalPadding = extraVerticalPadding
         self.content = content()
     }
     
@@ -234,7 +247,7 @@ struct SettingsRow<Content: View>: View {
                 content
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 11)
+            .padding(.vertical, 11 + extraVerticalPadding)
             
             if showDivider {
                 Divider()
@@ -282,10 +295,14 @@ struct PlaybackSettingsView: View {
                 }
             }
 
-            SettingsSection("Playback") {
-                SettingsRow("Loop Multi-file Playback", showDivider: false) {
+            SettingsSection(
+                "Playback",
+                backgroundColor: Color(nsColor: NSColor(calibratedWhite: 0.92, alpha: 1.0))
+            ) {
+                SettingsRow("Loop Multi-file Playback", showDivider: false, extraVerticalPadding: 4) {
                     Toggle("", isOn: $loopMultiFilePlayback)
                         .labelsHidden()
+                        .toggleStyle(.switch)
                 }
             }
         }
