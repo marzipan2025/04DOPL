@@ -660,6 +660,7 @@ private struct DotsOverlayView: View {
         // 도트 렌더 + 색상 샘플링
         var sampR = 0.0, sampG = 0.0, sampB = 0.0, sampN = 0
         var sampR2 = 0.0, sampG2 = 0.0, sampB2 = 0.0, sampN2 = 0
+        let peekAnchor = isPeeking ? layout.findTopRightAnchor() : nil
 
         for rowIdx in 1..<(layout.totalRows - 1) {
             for colIdx in 1..<(layout.totalCols - 1) {
@@ -685,9 +686,15 @@ private struct DotsOverlayView: View {
                     sampN2 += 1
                 }
 
-                // 피크 중엔 도트 자체를 그리지 않음 — 뒤에 보이는 실제 영상이 드러나도록.
-                // 색상 샘플은 여전히 누적해 자막 적응형 색 계산은 유지(실영상도 거의 같은 색).
-                if isPeeking { continue }
+                // 피크 중엔 실제 영상을 드러내되, 피크 토글을 되돌릴 우상단 도트만 흰색으로 남긴다.
+                // anchor는 동일 레이아웃에서 계산하므로 도트 크기/간격 변화에 그대로 따라간다.
+                if isPeeking {
+                    if let peekAnchor, rowIdx == peekAnchor.row, colIdx == peekAnchor.col {
+                        let dotRect = CGRect(x: c.x - layout.half, y: c.y - layout.half, width: dotD, height: dotD)
+                        context.fill(Path(ellipseIn: dotRect), with: .color(indicatorColorPlay))
+                    }
+                    continue
+                }
 
                 // 텍스트 rect와 깊이(penetration) 2px 이상 겹치면 숨김
                 if shouldHideDot(at: c, rect: subtitleHideRect, half: layout.half) { continue }
