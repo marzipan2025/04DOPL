@@ -191,7 +191,7 @@ struct SettingsSection<Content: View>: View {
     
     init(
         _ title: String,
-        backgroundColor: Color = Color(nsColor: .controlBackgroundColor).opacity(0.92),
+        backgroundColor: Color = Color(nsColor: NSColor(calibratedWhite: 0.96, alpha: 1.0)),
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
@@ -227,7 +227,7 @@ struct SettingsRow<Content: View>: View {
     init(
         _ label: String,
         showDivider: Bool = true,
-        extraVerticalPadding: CGFloat = 0,
+        extraVerticalPadding: CGFloat = 4,
         @ViewBuilder content: () -> Content
     ) {
         self.label = label
@@ -267,10 +267,12 @@ struct GeneralSettingsView: View {
                 SettingsRow("Auto-play on Open") {
                     Toggle("", isOn: $autoPlayOnOpen)
                         .labelsHidden()
+                        .toggleStyle(.switch)
                 }
                 SettingsRow("Remember Playback Position", showDivider: false) {
                     Toggle("", isOn: $rememberPlaybackPosition)
                         .labelsHidden()
+                        .toggleStyle(.switch)
                 }
             }
         }
@@ -278,28 +280,12 @@ struct GeneralSettingsView: View {
 }
 
 struct PlaybackSettingsView: View {
-    @AppStorage("defaultPlaybackSpeed") private var defaultPlaybackSpeed = 1.0
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            SettingsSection("Speed") {
-                SettingsRow("Default Playback Speed", showDivider: false) {
-                    HStack {
-                        Slider(value: $defaultPlaybackSpeed, in: 0.5...2.0, step: 0.25)
-                            .frame(width: 130)
-                        Text(String(format: "%.1fx", defaultPlaybackSpeed))
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
-                            .frame(width: 40, alignment: .trailing)
-                    }
-                }
-            }
-
-            SettingsSection(
-                "Playback",
-                backgroundColor: Color(nsColor: NSColor(calibratedWhite: 0.92, alpha: 1.0))
-            ) {
-                SettingsRow("Loop Multi-file Playback", showDivider: false, extraVerticalPadding: 4) {
+            SettingsSection("Playback") {
+                SettingsRow("Loop Multi-file Playback", showDivider: false) {
                     Toggle("", isOn: $loopMultiFilePlayback)
                         .labelsHidden()
                         .toggleStyle(.switch)
