@@ -1,8 +1,8 @@
 import SwiftUI
 import AppKit
 
-private let settingsWindowBackground = Color(nsColor: NSColor(calibratedWhite: 0.07, alpha: 1.0))
-private let settingsSidebarBackground = Color(nsColor: NSColor(calibratedWhite: 0.11, alpha: 1.0))
+private let settingsWindowBackground = Color(nsColor: NSColor(calibratedWhite: 0.11, alpha: 1.0))
+private let settingsSidebarBackground = Color(nsColor: NSColor(calibratedWhite: 0.07, alpha: 1.0))
 private let settingsPanelBackground = Color(nsColor: NSColor(calibratedWhite: 0.14, alpha: 1.0))
 private let settingsPanelStroke = Color.white.opacity(0.08)
 private let settingsDividerColor = Color.white.opacity(0.08)
@@ -28,7 +28,7 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
             guard let window = view.window else { return }
             AppDelegate.restoreSettingsWindowStyle(window)
             window.appearance = NSAppearance(named: .darkAqua)
-            window.backgroundColor = NSColor(calibratedWhite: 0.07, alpha: 1.0)
+            window.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0)
             window.minSize = NSSize(width: 640, height: 460)
             window.setContentSize(NSSize(
                 width: max(window.frame.width, 640),
@@ -43,7 +43,7 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
             guard let window = nsView.window else { return }
             AppDelegate.restoreSettingsWindowStyle(window)
             window.appearance = NSAppearance(named: .darkAqua)
-            window.backgroundColor = NSColor(calibratedWhite: 0.07, alpha: 1.0)
+            window.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0)
             window.minSize = NSSize(width: 640, height: 460)
         }
     }
@@ -220,7 +220,7 @@ struct SettingsSection<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(title)
-                .font(SettingsFont.bold(14))
+                .font(SettingsFont.regular(14))
                 .foregroundColor(.secondary)
             
             VStack(spacing: 0) {
