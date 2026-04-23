@@ -129,7 +129,7 @@ codesign --force --sign - --deep --timestamp=none "$APP_BUNDLE"
 
 echo "    ✓ ffmpeg 임베드 완료 (Frameworks: $(du -sh "$FW_DIR" | cut -f1))"
 
-echo "▶ 4/5  DMG 생성 중…"
+echo "▶ 4/5  DMG 생성 및 Finder 창 설정 중…"
 if [ -d "/Volumes/${VOL_NAME}" ]; then
   hdiutil detach "/Volumes/${VOL_NAME}" -force >/dev/null 2>&1 || true
 fi
@@ -142,8 +142,42 @@ hdiutil create \
   -ov \
   "${TEMP_DIR}/temp.dmg" >/dev/null
 
-# osascript를 통한 Finder 설정은 샌드박스 환경에서 불안정할 수 있으므로 생략하거나 최소화
-# 여기서는 단순히 DMG 생성에 집중
+hdiutil attach "${TEMP_DIR}/temp.dmg" -readwrite -noverify -noautoopen >/dev/null
+sleep 2
+
+osascript <<APPLESCRIPT
+tell application "Finder"
+  tell disk "${VOL_NAME}"
+    open
+    set current view of container window to icon view
+    set toolbar visible of container window to false
+    set statusbar visible of container window to false
+    set bounds of container window to {100, 100, 740, 580}
+    set theViewOptions to icon view options of container window
+    set arrangement of theViewOptions to not arranged
+    set icon size of theViewOptions to 80
+    set background picture of theViewOptions to file ".background:background.png"
+    set position of item "${APP_NAME}.app" of container window to {195, 240}
+    set position of item "Applications"    of container window to {445, 240}
+    close
+    open
+    update without registering applications
+    delay 1
+    close
+  end tell
+end tell
+APPLESCRIPT
+
+sync; sleep 2
+
+for attempt in 1 2 3; do
+  hdiutil detach "/Volumes/${VOL_NAME}" >/dev/null 2>&1 && break || sleep 1
+done
+hdiutil detach "/Volumes/${VOL_NAME}" -force >/dev/null 2>&1 || true
+
+for i in 1 2 3 4 5; do
+  [ ! -d "/Volumes/${VOL_NAME}" ] && break; sleep 1
+done
 
 echo "▶ 5/5  압축 DMG 변환 중…"
 mkdir -p "$(dirname "${OUTPUT}")"
