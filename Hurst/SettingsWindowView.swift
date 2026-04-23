@@ -277,6 +277,9 @@ struct GeneralSettingsView: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
+            }
+
+            SettingsSection("Appearance") {
                 SettingsRow("Accent Color", showDivider: false, extraVerticalPadding: 4) {
                     HStack(spacing: 13) {
                         ForEach(AppAccentColor.allCases) { choice in
@@ -314,7 +317,7 @@ private struct AccentColorSwatch: View {
             .frame(width: 28, height: 28)
             .overlay(
                 Circle()
-                    .stroke(isSelected ? choice.color.opacity(0.95) : Color.primary.opacity(0.14), lineWidth: isSelected ? 2 : 1)
+                    .stroke(isSelected ? choice.color.opacity(0.95) : Color.primary.opacity(0.14), lineWidth: isSelected ? 1 : 0.5)
             )
         }
         .buttonStyle(.plain)
