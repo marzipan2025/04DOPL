@@ -266,6 +266,7 @@ struct GeneralSettingsView: View {
 
 struct PlaybackSettingsView: View {
     @AppStorage("defaultPlaybackSpeed") private var defaultPlaybackSpeed = 1.0
+    @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -278,6 +279,13 @@ struct PlaybackSettingsView: View {
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .frame(width: 40, alignment: .trailing)
                     }
+                }
+            }
+
+            SettingsSection("Playback") {
+                SettingsRow("Loop Multi-file Playback", showDivider: false) {
+                    Toggle("", isOn: $loopMultiFilePlayback)
+                        .labelsHidden()
                 }
             }
         }

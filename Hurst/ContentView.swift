@@ -991,6 +991,7 @@ struct ContentView: View {
     /// 파일 다이얼로그로 연 파일 목록 (이름순 정렬). URL/드래그드롭은 단일 항목으로 세팅.
     @State private var playlist: [URL] = []
     @State private var playlistIndex: Int = 0
+    @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("04dopl.backgroundStyle") private var backgroundStyleRaw: Int = BackgroundStyle.blur.rawValue
     /// 풀스크린 전용 배경 모드. 일반 모드와 독립적으로 영속.
     @AppStorage("04dopl.fullscreenBackgroundStyle") private var fullscreenBackgroundStyleRaw: Int = FullscreenBackgroundStyle.black.rawValue
@@ -1610,11 +1611,14 @@ struct ContentView: View {
         sampler.triggerBorderBlink()
     }
 
-    /// 플레이리스트 자동 전진 (영상 종료 시). 마지막이면 그냥 종료.
+    /// 플레이리스트 자동 전진 (영상 종료 시). 멀티 파일 루프가 켜져 있으면 마지막에서 처음으로 돌아간다.
     private func advancePlaylist() {
         let next = playlistIndex + 1
-        guard next < playlist.count else { return }
-        openPlaylistItem(at: next, searchStep: 1)
+        if next < playlist.count {
+            openPlaylistItem(at: next, searchStep: 1)
+        } else if loopMultiFilePlayback && playlist.count > 1 {
+            openPlaylistItem(at: 0, searchStep: 1)
+        }
     }
 
     /// Shift+← : 이전 파일. 없으면 핑크 깜빡임.
