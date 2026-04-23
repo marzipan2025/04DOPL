@@ -992,6 +992,7 @@ struct ContentView: View {
     @State private var playlist: [URL] = []
     @State private var playlistIndex: Int = 0
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
+    @AppStorage("tapToPeek") private var tapToPeek = false
     @AppStorage("04dopl.backgroundStyle") private var backgroundStyleRaw: Int = BackgroundStyle.blur.rawValue
     /// 풀스크린 전용 배경 모드. 일반 모드와 독립적으로 영속.
     @AppStorage("04dopl.fullscreenBackgroundStyle") private var fullscreenBackgroundStyleRaw: Int = FullscreenBackgroundStyle.black.rawValue
@@ -1115,6 +1116,7 @@ struct ContentView: View {
     @discardableResult
     private func resumeLastMedia() -> Bool {
         guard !lastMediaValue.isEmpty else { return false }
+        endPeekIfNeeded()
         switch lastMediaKind {
         case "file":
             let url = URL(fileURLWithPath: lastMediaValue)
@@ -1379,6 +1381,9 @@ struct ContentView: View {
         }
         .onChange(of: isFullscreen)     { _, _ in updateSleepPrevention() }
         .onChange(of: sampler.isPlaying) { _, _ in updateSleepPrevention() }
+        .onChange(of: tapToPeek) { _, enabled in
+            if !enabled { endPeekIfNeeded() }
+        }
         .onChange(of: sampler.videoSize) { _, newSize in
             // 오픈 경로에서 세운 플래그가 켜진 상태에서 실제 크기 확보되면 1회 실행.
             if pendingAutoResize && newSize.width > 0 && newSize.height > 0 {
@@ -1587,6 +1592,7 @@ struct ContentView: View {
         while candidate >= 0, candidate < playlist.count {
             let url = playlist[candidate]
             if !url.isFileURL || FileManager.default.fileExists(atPath: url.path) {
+                endPeekIfNeeded()
                 playlistIndex = candidate
                 subtitlePromptURL = findSiblingSubtitle(for: url)
                 if playlist.count == 1, !VideoSampler.isImageFile(url: url) {
@@ -1664,7 +1670,7 @@ struct ContentView: View {
     }
 
     /// 피크 히트 영역: 우상단 visible 도트 한 칸 크기의 투명 영역.
-    /// DragGesture(minimumDistance: 0)으로 프레스/릴리즈를 감지.
+    /// 기본 모드는 프레스/릴리즈, Tap to Peek 모드는 탭 토글로 동작한다.
     @ViewBuilder
     private func peekHitArea(size: CGSize) -> some View {
         let grid = sampler.gridSize
@@ -1678,27 +1684,47 @@ struct ContentView: View {
         )
         if let anchor = layout.findTopRightAnchor() {
             let c = layout.center(row: anchor.row, col: anchor.col)
-            Color.clear
-                .contentShape(Rectangle())
-                .frame(width: grid, height: grid)
-                .position(x: c.x, y: c.y)
-                .gesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { _ in
-                            // onChanged는 연속 발생 → idempotent하게 처리.
-                            if !isPeeking {
-                                isPeeking = true
-                                sampler.peekStart()
+            if tapToPeek {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .frame(width: grid, height: grid)
+                    .position(x: c.x, y: c.y)
+                    .onTapGesture { togglePeek() }
+            } else {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .frame(width: grid, height: grid)
+                    .position(x: c.x, y: c.y)
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { _ in
+                                // onChanged는 연속 발생 → idempotent하게 처리.
+                                if !isPeeking {
+                                    isPeeking = true
+                                    sampler.peekStart()
+                                }
                             }
-                        }
-                        .onEnded { _ in
-                            if isPeeking {
-                                isPeeking = false
-                                sampler.peekEnd()
+                            .onEnded { _ in
+                                endPeekIfNeeded()
                             }
-                        }
-                )
+                    )
+            }
         }
+    }
+
+    private func togglePeek() {
+        if isPeeking {
+            endPeekIfNeeded()
+        } else {
+            isPeeking = true
+            sampler.peekStart()
+        }
+    }
+
+    private func endPeekIfNeeded() {
+        guard isPeeking else { return }
+        isPeeking = false
+        sampler.peekEnd()
     }
 
     /// URL 편집 제출: 공백 제거 후 비어있지 않으면 재생 시도. 편집 상태는 무조건 종료.
@@ -1708,6 +1734,7 @@ struct ContentView: View {
         urlBuffer = ""
         if !trimmed.isEmpty {
             // 사용자 입력 원본을 기억. 추출된 스트림 URL은 만료되므로 부적절.
+            endPeekIfNeeded()
             rememberLastURL(trimmed)
             pendingAutoResize = true
             sampler.openURL(trimmed)
@@ -1744,6 +1771,7 @@ struct ContentView: View {
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
         if isEditingURL { isEditingURL = false; urlBuffer = "" }
         dismissPlaybackInfo()
+        endPeekIfNeeded()
         rememberLastURL(value, title: displayTitle)
         pendingAutoResize = true
         sampler.openURL(value)
@@ -1843,6 +1871,7 @@ struct ContentView: View {
         case .url:
             if isEditingURL { isEditingURL = false; urlBuffer = "" }
             dismissPlaybackInfo()
+            endPeekIfNeeded()
             rememberLastURL(value, title: title)
             pendingAutoResize = true
             sampler.openURL(value)

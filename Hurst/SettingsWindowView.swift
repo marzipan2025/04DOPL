@@ -251,7 +251,7 @@ struct SettingsRow<Content: View>: View {
             
             if showDivider {
                 Divider()
-                    .padding(.leading, 16)
+                    .padding(.horizontal, 16)
             }
         }
     }
@@ -281,12 +281,18 @@ struct GeneralSettingsView: View {
 
 struct PlaybackSettingsView: View {
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
+    @AppStorage("tapToPeek") private var tapToPeek = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsSection("Playback") {
-                SettingsRow("Loop Multi-file Playback", showDivider: false) {
+                SettingsRow("Loop Multi-file Playback") {
                     Toggle("", isOn: $loopMultiFilePlayback)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                SettingsRow("Tap to Peek", showDivider: false) {
+                    Toggle("", isOn: $tapToPeek)
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
