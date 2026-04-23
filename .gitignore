@@ -9,5 +9,9 @@ Hurst.xcodeproj/xcuserdata/
 Hurst.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcuserstate
 
-DevTools/test_gesture
-DevTools/Samples/test_wma_output.mp4
+DevTools/
+build_dmg.command
+make_dmg.sh
+open_direct_in_04dopl.command
+resolve_direct_url.command
+resolve_display_title.command
