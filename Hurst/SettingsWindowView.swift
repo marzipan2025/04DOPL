@@ -439,27 +439,11 @@ struct PlaybackSettingsView: View {
 
 struct LicencesSettingsView: View {
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            VStack(alignment: .leading, spacing: 0) {
-                ScrollView {
-                    Text(Self.licenseText)
-                        .font(SettingsFont.regular(13))
-                        .foregroundStyle(.primary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 18)
-                        .padding(.horizontal, 18)
-                        .padding(.bottom, 18)
-                }
-                .frame(maxWidth: .infinity, minHeight: 340, maxHeight: 340)
-            }
-            .background(settingsPanelBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(settingsPanelStroke, lineWidth: 0.5)
-            )
-        }
+        Text(Self.licenseText)
+            .font(SettingsFont.regular(13))
+            .foregroundStyle(.primary)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private static let licenseText = """
