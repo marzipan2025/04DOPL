@@ -1046,7 +1046,7 @@ struct ContentView: View {
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
-    @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = true
+    @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @AppStorage("04dopl.backgroundStyle") private var backgroundStyleRaw: Int = BackgroundStyle.blur.rawValue
     /// 풀스크린 전용 배경 모드. 일반 모드와 독립적으로 영속.
@@ -2111,7 +2111,7 @@ struct ContentView: View {
         loopMultiFilePlayback = false
         tapToPeek = false
         preventFullscreenDisplaySleep = false
-        rememberPlaybackPosition = true
+        rememberPlaybackPosition = false
         accentColorRaw = AppAccentColor.defaultChoice.rawValue
         backgroundStyleRaw = BackgroundStyle.blur.rawValue
         fullscreenBackgroundStyleRaw = FullscreenBackgroundStyle.black.rawValue

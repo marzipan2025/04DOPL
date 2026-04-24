@@ -211,7 +211,7 @@ private extension SettingsWindowView.SettingsTab {
         case .playback:
             return "Behaviors and Controls"
         case .licences:
-            return "Third-party notices and license information"
+            return "Third-party Licenses and copyrights"
         }
     }
 }
@@ -293,7 +293,7 @@ struct SettingsRow<Content: View>: View {
 
 struct GeneralSettingsView: View {
     @AppStorage("autoPlayOnOpen") private var autoPlayOnOpen = true
-    @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = true
+    @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
     
@@ -460,11 +460,13 @@ struct LicencesSettingsView: View {
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 2)
 
             Link(Self.repositoryURL.absoluteString, destination: Self.repositoryURL)
                 .font(SettingsFont.regular(13))
                 .foregroundStyle(.blue)
                 .padding(.top, 2)
+                .padding(.leading, 2)
 
             Spacer()
                 .frame(height: 42)
