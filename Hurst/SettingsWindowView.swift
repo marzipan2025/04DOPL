@@ -337,19 +337,12 @@ struct GeneralSettingsView: View {
                     Button {
                         isResetConfirmationVisible.toggle()
                     } label: {
-                        Text(isResetConfirmationVisible ? "Cancel" : "Reset Everything")
-                            .font(SettingsFont.regular(14))
-                            .foregroundStyle(.primary)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .fill(Color.white.opacity(0.08))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(settingsPanelStroke, lineWidth: 0.5)
-                            )
+                        SettingsFooterButtonLabel(
+                            title: isResetConfirmationVisible ? "Cancel" : "Reset Everything",
+                            foregroundColor: .primary,
+                            backgroundColor: Color.white.opacity(0.08),
+                            strokeColor: settingsPanelStroke
+                        )
                     }
                     .buttonStyle(.plain)
 
@@ -358,21 +351,43 @@ struct GeneralSettingsView: View {
                             NotificationCenter.default.post(name: .resetAppStateRequested, object: nil)
                             isResetConfirmationVisible = false
                         } label: {
-                            Text("Are you sure?")
-                                .font(SettingsFont.regular(14))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 6)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                        .fill(AppAccentColor.choice(for: accentColorRaw).color)
-                                )
+                            SettingsFooterButtonLabel(
+                                title: "Are you sure?",
+                                foregroundColor: .white,
+                                backgroundColor: AppAccentColor.choice(for: accentColorRaw).color
+                            )
                         }
                         .buttonStyle(.plain)
                     }
                 }
             }
         }
+    }
+}
+
+private struct SettingsFooterButtonLabel: View {
+    let title: String
+    let foregroundColor: Color
+    let backgroundColor: Color
+    var strokeColor: Color? = nil
+
+    var body: some View {
+        Text(title)
+            .font(SettingsFont.regular(14))
+            .foregroundStyle(foregroundColor)
+            .offset(y: -2)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(backgroundColor)
+            )
+            .overlay {
+                if let strokeColor {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(strokeColor, lineWidth: 0.5)
+                }
+            }
     }
 }
 
@@ -439,12 +454,25 @@ struct PlaybackSettingsView: View {
 
 struct LicencesSettingsView: View {
     var body: some View {
-        Text(Self.licenseText)
-            .font(SettingsFont.regular(13))
-            .foregroundStyle(.primary)
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(Self.licenseText)
+                .font(SettingsFont.regular(13))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            Link(Self.repositoryURL.absoluteString, destination: Self.repositoryURL)
+                .font(SettingsFont.regular(13))
+                .foregroundStyle(.blue)
+                .padding(.top, 2)
+
+            Spacer()
+                .frame(height: 42)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
+
+    private static let repositoryURL = URL(string: "https://github.com/marzipan2025/04DOPL")!
 
     private static let licenseText = """
     04dopl third-party notices
@@ -488,7 +516,5 @@ struct LicencesSettingsView: View {
     -----
 
     If you believe any required notice or license information is missing, need support, or would like to discuss professional collaboration related to this app, please contact us through the project repository on GitHub:
-
-    https://github.com/marzipan2025/04DOPL
     """
 }
