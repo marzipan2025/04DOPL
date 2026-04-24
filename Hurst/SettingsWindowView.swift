@@ -29,10 +29,10 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
             AppDelegate.restoreSettingsWindowStyle(window)
             window.appearance = NSAppearance(named: .darkAqua)
             window.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0)
-            window.minSize = NSSize(width: 640, height: 460)
+            window.minSize = NSSize(width: 640, height: 444)
             window.setContentSize(NSSize(
                 width: max(window.frame.width, 640),
-                height: max(window.frame.height, 460)
+                height: 444
             ))
         }
         return view
@@ -44,7 +44,11 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
             AppDelegate.restoreSettingsWindowStyle(window)
             window.appearance = NSAppearance(named: .darkAqua)
             window.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0)
-            window.minSize = NSSize(width: 640, height: 460)
+            window.minSize = NSSize(width: 640, height: 444)
+            window.setContentSize(NSSize(
+                width: max(window.frame.width, 640),
+                height: 444
+            ))
         }
     }
 }
@@ -88,7 +92,7 @@ struct SettingsWindowView: View {
                 detailPane
             }
         }
-        .frame(minWidth: 640, minHeight: 460)
+        .frame(minWidth: 640, minHeight: 444)
         .background(settingsWindowBackground)
         .preferredColorScheme(.dark)
     }
@@ -313,8 +317,8 @@ struct GeneralSettingsView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                Text("This restores preferences, history, and remembered app state to the original defaults.")
+            VStack(alignment: .leading, spacing: 18) {
+                Text("This will permanently clear preferences, history, cache, and remembered app state. It cannot be undone.")
                     .font(SettingsFont.regular(14))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -323,11 +327,11 @@ struct GeneralSettingsView: View {
                     Button {
                         isResetConfirmationVisible.toggle()
                     } label: {
-                        Text("Reset Everything")
+                        Text(isResetConfirmationVisible ? "Cancel" : "Reset Everything")
                             .font(SettingsFont.regular(14))
                             .foregroundStyle(.primary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
                             .background(
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                                     .fill(Color.white.opacity(0.08))
@@ -347,8 +351,8 @@ struct GeneralSettingsView: View {
                             Text("Are you sure?")
                                 .font(SettingsFont.regular(14))
                                 .foregroundStyle(.white)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 6)
                                 .background(
                                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                                         .fill(AppAccentColor.choice(for: accentColorRaw).color)

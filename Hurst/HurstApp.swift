@@ -235,7 +235,7 @@ struct HurstApp: App {
         Window("Settings", id: "settings-window") {
             SettingsWindowView()
         }
-        .defaultSize(width: 640, height: 460)
+        .defaultSize(width: 640, height: 444)
         .windowResizability(.contentMinSize)
         .windowStyle(.hiddenTitleBar)
 
