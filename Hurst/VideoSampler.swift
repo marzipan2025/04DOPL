@@ -852,6 +852,28 @@ class VideoSampler: ObservableObject {
 
     // MARK: - Controls
 
+    func seek(toSeconds seconds: Double) {
+        guard let player else { return }
+        let safeSeconds = max(0, seconds)
+        if let item = player.currentItem {
+            let duration = item.duration.seconds
+            let clamped: Double
+            if duration.isFinite && duration > 0 {
+                clamped = min(safeSeconds, max(0, duration - 0.25))
+            } else {
+                clamped = safeSeconds
+            }
+            player.seek(
+                to: CMTime(seconds: clamped, preferredTimescale: 600),
+                toleranceBefore: .zero,
+                toleranceAfter: .zero
+            )
+        } else {
+            player.seek(to: CMTime(seconds: safeSeconds, preferredTimescale: 600))
+        }
+        startTimerIfNeeded()
+    }
+
     func togglePlayPause() {
         guard let player else { return }
         if isPlaying { player.pause() } else { player.play() }
@@ -1293,6 +1315,26 @@ class VideoSampler: ObservableObject {
         audioAnalysisTask = nil
         hasSubtitles = false
         currentSubtitle = ""
+    }
+
+    func resetAppState() {
+        cleanup()
+        if let prev = activeRemuxTempURL {
+            try? FileManager.default.removeItem(at: prev)
+            activeRemuxTempURL = nil
+        }
+        urlLoadError = nil
+        overlayEffect = .none
+        overlayProgress = 0
+        overlayBlinks = 1
+        overlayIsAlert = false
+        overlayStartTime = nil
+        showSubtitles = true
+        backgroundDotAlpha = 0.40
+        gridSize = defaultGridSize
+        dotDiameter = defaultDotDiameter
+        subtitleFontSize = subtitleFontDefault
+        lastVolume = 1.0
     }
 }
 

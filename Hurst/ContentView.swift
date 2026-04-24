@@ -1020,6 +1020,8 @@ private struct DotsOverlayView: View {
 // MARK: - Content View
 
 struct ContentView: View {
+    private static let playbackPositionsKey = "04dopl.playbackPositions.v1"
+
     @StateObject private var sampler = VideoSampler()
     @EnvironmentObject private var recents: RecentsStore
     @State private var hostWindow: NSWindow?
@@ -1044,10 +1046,12 @@ struct ContentView: View {
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
+    @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = true
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @AppStorage("04dopl.backgroundStyle") private var backgroundStyleRaw: Int = BackgroundStyle.blur.rawValue
     /// 풀스크린 전용 배경 모드. 일반 모드와 독립적으로 영속.
     @AppStorage("04dopl.fullscreenBackgroundStyle") private var fullscreenBackgroundStyleRaw: Int = FullscreenBackgroundStyle.black.rawValue
+    @AppStorage(Self.playbackPositionsKey) private var playbackPositionsData: String = ""
     @State private var backgroundStyleLabel: String? = nil
     @State private var backgroundStyleLabelTask: Task<Void, Never>? = nil
     /// 대기 상태에서 파일 드래그 호버 중일 때 true. 악센트 테두리 시각 피드백용.
@@ -1059,6 +1063,8 @@ struct ContentView: View {
     @State private var pendingAutoResize: Bool = false
     
     @State private var dragAccumulator: CGSize = .zero
+    @State private var currentPlaybackPositionKey: String?
+    @State private var restorePlaybackPositionTask: Task<Void, Never>?
 
     // 마지막 재생 기억: 대기상태에서 Space 누르면 이걸 재로드 (처음부터 재생).
     // 이미지는 저장 대상이 아님. 내부 임시 스트림도 저장 안 함.
@@ -1079,6 +1085,37 @@ struct ContentView: View {
 
     private var accentColor: Color {
         AppAccentColor.choice(for: accentColorRaw).color
+    }
+
+    private var urlLoadErrorPresented: Binding<Bool> {
+        Binding(
+            get: { sampler.urlLoadError != nil },
+            set: { newValue in
+                if !newValue {
+                    sampler.urlLoadError = nil
+                }
+            }
+        )
+    }
+
+    private var playbackPositions: [String: Double] {
+        get {
+            guard let data = playbackPositionsData.data(using: .utf8),
+                  let decoded = try? JSONDecoder().decode([String: Double].self, from: data) else {
+                return [:]
+            }
+            return decoded
+        }
+        nonmutating set {
+            if newValue.isEmpty {
+                playbackPositionsData = ""
+            } else if let data = try? JSONEncoder().encode(newValue),
+                      let encoded = String(data: data, encoding: .utf8) {
+                playbackPositionsData = encoded
+            } else {
+                playbackPositionsData = ""
+            }
+        }
     }
 
     /// 피크 가능 조건: 실제 영상이 로드되어 있고, URL 편집 중이 아니며, 로딩 중이 아님.
@@ -1172,6 +1209,7 @@ struct ContentView: View {
     @discardableResult
     private func resumeLastMedia() -> Bool {
         guard !lastMediaValue.isEmpty else { return false }
+        persistCurrentPlaybackPositionIfNeeded()
         endPeekIfNeeded()
         switch lastMediaKind {
         case "file":
@@ -1179,8 +1217,11 @@ struct ContentView: View {
             guard FileManager.default.fileExists(atPath: url.path) else { return false }
             playlist = [url]
             playlistIndex = 0
+            let key = playbackPositionKey(forFileURL: url)
+            currentPlaybackPositionKey = key
             pendingAutoResize = true
             sampler.open(url: url)
+            restorePlaybackPositionIfNeeded(for: key)
             return true
         case "fileGroup":
             guard let data = lastMediaPathsData.data(using: .utf8),
@@ -1190,15 +1231,18 @@ struct ContentView: View {
             openFiles(urls, recordRecent: false, rememberAsLast: false)
             return true
         case "url":
+            let key = playbackPositionKey(forURLString: lastMediaValue)
+            currentPlaybackPositionKey = key
             pendingAutoResize = true
             sampler.openURL(lastMediaValue)
+            restorePlaybackPositionIfNeeded(for: key)
             return true
         default:
             return false
         }
     }
 
-    var body: some View {
+    private var rootCanvas: some View {
         ZStack {
             WindowDragArea(
                 onSingleClick: {
@@ -1340,6 +1384,10 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
         }
+    }
+
+    private var interactiveCanvas: some View {
+        rootCanvas
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
             if isFullscreen {
@@ -1406,6 +1454,10 @@ struct ContentView: View {
                 _ = AppDelegate.deliverPendingExternalMediaOpenRequestIfPossible()
             }
         )
+    }
+
+    private var configuredCanvas: some View {
+        interactiveCanvas
         .onAppear {
             installKeyMonitor()
             DispatchQueue.main.async {
@@ -1433,12 +1485,19 @@ struct ContentView: View {
             }
         }
         .onDisappear {
+            persistCurrentPlaybackPositionIfNeeded()
             if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
             cursorHider.stop()
             releaseSleepAssertion()
+            restorePlaybackPositionTask?.cancel()
         }
         .onChange(of: isFullscreen)     { _, _ in updateSleepPrevention() }
         .onChange(of: sampler.isPlaying) { _, _ in updateSleepPrevention() }
+        .onChange(of: sampler.isPlaying) { _, isPlaying in
+            if !isPlaying {
+                persistCurrentPlaybackPositionIfNeeded()
+            }
+        }
         .onChange(of: preventFullscreenDisplaySleep) { _, _ in updateSleepPrevention() }
         .onChange(of: tapToPeek) { _, enabled in
             if !enabled { endPeekIfNeeded() }
@@ -1485,10 +1544,14 @@ struct ContentView: View {
             onPlaybackEnded:        advancePlaylist,
             onOpenRecent:           handleOpenRecentNotification
         ))
-        .alert("URL 재생 실패", isPresented: Binding(
-            get: { sampler.urlLoadError != nil },
-            set: { if !$0 { sampler.urlLoadError = nil } }
-        )) {
+        .onReceive(NotificationCenter.default.publisher(for: .resetAppStateRequested)) { _ in
+            handleResetAppStateRequested()
+        }
+    }
+
+    var body: some View {
+        configuredCanvas
+        .alert("URL 재생 실패", isPresented: urlLoadErrorPresented) {
             Button("확인", role: .cancel) { sampler.urlLoadError = nil }
         } message: {
             Text(sampler.urlLoadError ?? "")
@@ -1549,6 +1612,68 @@ struct ContentView: View {
             }
         }
         return srtMatch ?? smiMatch
+    }
+
+    private func playbackPositionKey(forFileURL url: URL) -> String? {
+        guard !VideoSampler.isImageFile(url: url) else { return nil }
+        return "file:\(url.path)"
+    }
+
+    private func playbackPositionKey(forURLString value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return "url:\(trimmed)"
+    }
+
+    private func clearStoredPlaybackPosition(for key: String?) {
+        guard let key else { return }
+        var positions = playbackPositions
+        positions.removeValue(forKey: key)
+        playbackPositions = positions
+    }
+
+    private func persistCurrentPlaybackPositionIfNeeded() {
+        guard rememberPlaybackPosition, let key = currentPlaybackPositionKey else { return }
+        guard let player = sampler.previewPlayer else {
+            clearStoredPlaybackPosition(for: key)
+            return
+        }
+
+        let current = player.currentTime().seconds
+        guard current.isFinite, current >= 1 else {
+            clearStoredPlaybackPosition(for: key)
+            return
+        }
+
+        let duration = player.currentItem?.duration.seconds ?? 0
+        if duration.isFinite, duration > 0, current >= max(duration - 1, duration * 0.98) {
+            clearStoredPlaybackPosition(for: key)
+            return
+        }
+
+        var positions = playbackPositions
+        positions[key] = current
+        playbackPositions = positions
+    }
+
+    private func restorePlaybackPositionIfNeeded(for key: String?) {
+        restorePlaybackPositionTask?.cancel()
+        guard rememberPlaybackPosition,
+              let key,
+              let savedSeconds = playbackPositions[key],
+              savedSeconds.isFinite,
+              savedSeconds >= 1 else { return }
+
+        restorePlaybackPositionTask = Task {
+            for _ in 0..<30 {
+                if Task.isCancelled { return }
+                if sampler.previewPlayer?.currentItem != nil {
+                    sampler.seek(toSeconds: savedSeconds)
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
     }
 
     /// 사용자가 USE 수락 → 자막 로드. 실패 시 기존 악센트 레이블로 알림.
@@ -1651,15 +1776,19 @@ struct ContentView: View {
         while candidate >= 0, candidate < playlist.count {
             let url = playlist[candidate]
             if !url.isFileURL || FileManager.default.fileExists(atPath: url.path) {
+                persistCurrentPlaybackPositionIfNeeded()
                 endPeekIfNeeded()
                 playlistIndex = candidate
                 subtitlePromptURL = findSiblingSubtitle(for: url)
                 if playlist.count == 1, !VideoSampler.isImageFile(url: url) {
                     rememberLastFile(url, addToRecents: false)
                 }
+                let key = playbackPositionKey(forFileURL: url)
+                currentPlaybackPositionKey = key
                 pendingAutoResize = true
                 sampler.open(url: url)
                 sampler.isPlaying = true
+                restorePlaybackPositionIfNeeded(for: key)
                 return
             }
 
@@ -1678,6 +1807,7 @@ struct ContentView: View {
 
     /// 플레이리스트 자동 전진 (영상 종료 시). 멀티 파일 루프가 켜져 있으면 마지막에서 처음으로 돌아간다.
     private func advancePlaylist() {
+        clearStoredPlaybackPosition(for: currentPlaybackPositionKey)
         let next = playlistIndex + 1
         if next < playlist.count {
             openPlaylistItem(at: next, searchStep: 1)
@@ -1793,10 +1923,14 @@ struct ContentView: View {
         urlBuffer = ""
         if !trimmed.isEmpty {
             // 사용자 입력 원본을 기억. 추출된 스트림 URL은 만료되므로 부적절.
+            persistCurrentPlaybackPositionIfNeeded()
             endPeekIfNeeded()
             rememberLastURL(trimmed)
+            let key = playbackPositionKey(forURLString: trimmed)
+            currentPlaybackPositionKey = key
             pendingAutoResize = true
             sampler.openURL(trimmed)
+            restorePlaybackPositionIfNeeded(for: key)
         }
     }
 
@@ -1830,10 +1964,14 @@ struct ContentView: View {
         NSApp.windows.first?.makeKeyAndOrderFront(nil)
         if isEditingURL { isEditingURL = false; urlBuffer = "" }
         dismissPlaybackInfo()
+        persistCurrentPlaybackPositionIfNeeded()
         endPeekIfNeeded()
         rememberLastURL(value, title: displayTitle)
+        let key = playbackPositionKey(forURLString: value)
+        currentPlaybackPositionKey = key
         pendingAutoResize = true
         sampler.openURL(value)
+        restorePlaybackPositionIfNeeded(for: key)
     }
 
     private func handleOpenURLRequested(_ note: Notification) {
@@ -1930,11 +2068,61 @@ struct ContentView: View {
         case .url:
             if isEditingURL { isEditingURL = false; urlBuffer = "" }
             dismissPlaybackInfo()
+            persistCurrentPlaybackPositionIfNeeded()
             endPeekIfNeeded()
             rememberLastURL(value, title: title)
+            let key = playbackPositionKey(forURLString: value)
+            currentPlaybackPositionKey = key
             pendingAutoResize = true
             sampler.openURL(value)
+            restorePlaybackPositionIfNeeded(for: key)
         }
+    }
+
+    private func handleResetAppStateRequested() {
+        restorePlaybackPositionTask?.cancel()
+        endPeekIfNeeded()
+        dismissPlaybackInfo()
+        subtitlePromptURL = nil
+        isEditingURL = false
+        urlBuffer = ""
+        isDropTargeted = false
+        pendingAutoResize = false
+        dragAccumulator = .zero
+        if isAlwaysOnTop {
+            applyAlwaysOnTop(false)
+        }
+        isAlwaysOnTop = false
+
+        recents.clear()
+
+        let defaults = UserDefaults.standard
+        ["autoPlayOnOpen", "rememberPlaybackPosition", "loopMultiFilePlayback", "tapToPeek", "preventFullscreenDisplaySleep"]
+            .forEach { defaults.removeObject(forKey: $0) }
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("04dopl.") || key.hasPrefix("hurst.") {
+            defaults.removeObject(forKey: key)
+        }
+        defaults.synchronize()
+        AppDelegate.clearPendingExternalMediaOpenRequest()
+
+        playlist = []
+        playlistIndex = 0
+        currentPlaybackPositionKey = nil
+        loopMultiFilePlayback = false
+        tapToPeek = false
+        preventFullscreenDisplaySleep = false
+        rememberPlaybackPosition = true
+        accentColorRaw = AppAccentColor.defaultChoice.rawValue
+        backgroundStyleRaw = BackgroundStyle.blur.rawValue
+        fullscreenBackgroundStyleRaw = FullscreenBackgroundStyle.black.rawValue
+        lastMediaKind = ""
+        lastMediaValue = ""
+        lastMediaPathsData = ""
+        lastMediaTitle = ""
+        playbackPositionsData = ""
+
+        sampler.resetAppState()
+        releaseSleepAssertion()
     }
 
     // MARK: 키 모니터

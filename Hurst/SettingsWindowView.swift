@@ -281,6 +281,7 @@ struct GeneralSettingsView: View {
     @AppStorage("autoPlayOnOpen") private var autoPlayOnOpen = true
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = true
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
+    @State private var isResetConfirmationVisible = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -308,6 +309,52 @@ struct GeneralSettingsView: View {
                                 accentColorRaw = choice.rawValue
                             }
                         }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("This restores preferences, history, and remembered app state to the original defaults.")
+                    .font(SettingsFont.regular(14))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: 10) {
+                    Button {
+                        isResetConfirmationVisible.toggle()
+                    } label: {
+                        Text("Reset Everything")
+                            .font(SettingsFont.regular(14))
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color.white.opacity(0.08))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(settingsPanelStroke, lineWidth: 0.5)
+                            )
+                    }
+                    .buttonStyle(.plain)
+
+                    if isResetConfirmationVisible {
+                        Button {
+                            NotificationCenter.default.post(name: .resetAppStateRequested, object: nil)
+                            isResetConfirmationVisible = false
+                        } label: {
+                            Text("Are you sure?")
+                                .font(SettingsFont.regular(14))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                        .fill(AppAccentColor.choice(for: accentColorRaw).color)
+                                )
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }

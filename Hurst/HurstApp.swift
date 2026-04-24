@@ -16,6 +16,7 @@ extension Notification.Name {
     static let externalOpenMediaURL = Notification.Name("externalOpenMediaURL")
     /// 최근 항목 메뉴 클릭. userInfo["kind"], ["value"], ["paths"], ["title"] 를 사용.
     static let openRecentRequested   = Notification.Name("openRecentRequested")
+    static let resetAppStateRequested = Notification.Name("resetAppStateRequested")
 }
 
 struct ExternalMediaOpenRequest {
