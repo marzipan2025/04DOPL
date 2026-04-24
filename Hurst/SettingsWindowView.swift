@@ -195,7 +195,7 @@ private extension SettingsWindowView.SettingsTab {
         case .general:
             return "Core app behavior and launch defaults"
         case .playback:
-            return "Playback behavior and peek controls"
+            return "Behaviors and Controls"
         case .licences:
             return "Third-party notices and license information"
         }
@@ -348,17 +348,26 @@ private struct AccentColorSwatch: View {
 struct PlaybackSettingsView: View {
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
+    @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsSection("Playback") {
-                SettingsRow("Loop Multi-file Playback") {
+                SettingsRow("Loop Multi Files") {
                     Toggle("", isOn: $loopMultiFilePlayback)
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
                 SettingsRow("Tap to Peek", showDivider: false) {
                     Toggle("", isOn: $tapToPeek)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+            }
+
+            SettingsSection("Fullscreen") {
+                SettingsRow("Prevent Display Sleep", showDivider: false) {
+                    Toggle("", isOn: $preventFullscreenDisplaySleep)
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }

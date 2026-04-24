@@ -1043,6 +1043,7 @@ struct ContentView: View {
     @State private var playlistIndex: Int = 0
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
+    @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @AppStorage("04dopl.backgroundStyle") private var backgroundStyleRaw: Int = BackgroundStyle.blur.rawValue
     /// 풀스크린 전용 배경 모드. 일반 모드와 독립적으로 영속.
@@ -1438,6 +1439,7 @@ struct ContentView: View {
         }
         .onChange(of: isFullscreen)     { _, _ in updateSleepPrevention() }
         .onChange(of: sampler.isPlaying) { _, _ in updateSleepPrevention() }
+        .onChange(of: preventFullscreenDisplaySleep) { _, _ in updateSleepPrevention() }
         .onChange(of: tapToPeek) { _, enabled in
             if !enabled { endPeekIfNeeded() }
         }
@@ -1612,7 +1614,7 @@ struct ContentView: View {
 
     /// 풀스크린 + 재생 중일 때만 디스플레이/시스템 잠자기 방지. 그 외엔 즉시 해제.
     private func updateSleepPrevention() {
-        if isFullscreen && sampler.isPlaying {
+        if preventFullscreenDisplaySleep && isFullscreen && sampler.isPlaying {
             guard sleepAssertion == nil else { return }
             sleepAssertion = ProcessInfo.processInfo.beginActivity(
                 options: [.idleDisplaySleepDisabled, .idleSystemSleepDisabled],
