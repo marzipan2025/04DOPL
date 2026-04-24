@@ -104,19 +104,10 @@ struct SettingsWindowView: View {
                     Button {
                         selectedTab = tab
                     } label: {
-                        HStack(spacing: 10) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                    .fill(tab.color.gradient)
-                                Image(systemName: tab.icon)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.white)
-                            }
-                            .frame(width: 24, height: 24)
-
+                        HStack(spacing: 0) {
                             Text(tab.rawValue)
                                 .font(SettingsFont.regular(14))
-                                .foregroundStyle(.primary)
+                                .foregroundStyle(tab.color)
 
                             Spacer()
                         }
@@ -151,24 +142,14 @@ struct SettingsWindowView: View {
     private var detailPane: some View {
         if let tab = selectedTab {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 14) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .fill(tab.color.gradient)
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 26, weight: .semibold))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 64, height: 64)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(tab.rawValue)
+                        .font(SettingsFont.bold(26))
+                        .foregroundStyle(tab.color)
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(tab.rawValue)
-                            .font(SettingsFont.bold(26))
-
-                        Text(tab.subtitle)
-                            .font(SettingsFont.light(14))
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(tab.subtitle)
+                        .font(SettingsFont.light(14))
+                        .foregroundStyle(.secondary)
                 }
                 .padding(.top, 6)
                 .padding(.horizontal, 28)
