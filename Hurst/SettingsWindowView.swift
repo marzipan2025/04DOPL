@@ -121,7 +121,8 @@ struct SettingsWindowView: View {
                             Spacer()
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 10)
+                        .padding(.leading, 10)
+                        .padding(.trailing, 6)
                         .padding(.vertical, 8)
                         .background {
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -149,42 +150,51 @@ struct SettingsWindowView: View {
     @ViewBuilder
     private var detailPane: some View {
         if let tab = selectedTab {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(tab.color.gradient)
-                            Image(systemName: tab.icon)
-                                .font(.system(size: 26, weight: .semibold))
-                                .foregroundStyle(.white)
-                        }
-                        .frame(width: 64, height: 64)
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(tab.rawValue)
-                                .font(SettingsFont.bold(26))
-
-                            Text(tab.subtitle)
-                                .font(SettingsFont.light(14))
-                                .foregroundStyle(.secondary)
-                        }
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(tab.color.gradient)
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 26, weight: .semibold))
+                            .foregroundStyle(.white)
                     }
-                    .padding(.top, 24)
+                    .frame(width: 64, height: 64)
 
-                    switch tab {
-                    case .general:
-                        GeneralSettingsView()
-                    case .playback:
-                        PlaybackSettingsView()
-                    case .licences:
-                        LicencesSettingsView()
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(tab.rawValue)
+                            .font(SettingsFont.bold(26))
+
+                        Text(tab.subtitle)
+                            .font(SettingsFont.light(14))
+                            .foregroundStyle(.secondary)
                     }
                 }
-                .padding(.top, -18)
+                .padding(.top, 6)
                 .padding(.horizontal, 28)
-                .padding(.bottom, 28)
-                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Rectangle()
+                    .fill(settingsDividerColor)
+                    .frame(height: 1)
+                    .padding(.top, 24)
+                    .padding(.horizontal, 28)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 22) {
+                        switch tab {
+                        case .general:
+                            GeneralSettingsView()
+                        case .playback:
+                            PlaybackSettingsView()
+                        case .licences:
+                            LicencesSettingsView()
+                        }
+                    }
+                    .padding(.top, 20)
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 28)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .background(settingsWindowBackground)
         } else {
