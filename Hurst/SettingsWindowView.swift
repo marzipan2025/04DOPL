@@ -280,21 +280,21 @@ struct SettingsRow<Content: View>: View {
 }
 
 struct GeneralSettingsView: View {
-    @AppStorage("autoPlayOnOpen") private var autoPlayOnOpen = true
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
+    @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsSection("Behavior") {
-                SettingsRow("Auto-play on Open") {
-                    Toggle("", isOn: $autoPlayOnOpen)
+                SettingsRow("Remember Playback Position") {
+                    Toggle("", isOn: $rememberPlaybackPosition)
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
-                SettingsRow("Remember Playback Position", showDivider: false) {
-                    Toggle("", isOn: $rememberPlaybackPosition)
+                SettingsRow("Auto-resize Window to Video", showDivider: false) {
+                    Toggle("", isOn: $autoResizeWindowToVideo)
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }

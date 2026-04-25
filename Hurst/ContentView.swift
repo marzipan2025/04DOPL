@@ -1047,6 +1047,7 @@ struct ContentView: View {
     @AppStorage("tapToPeek") private var tapToPeek = false
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
+    @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @AppStorage("04dopl.backgroundStyle") private var backgroundStyleRaw: Int = BackgroundStyle.blur.rawValue
     /// 풀스크린 전용 배경 모드. 일반 모드와 독립적으로 영속.
@@ -1505,7 +1506,9 @@ struct ContentView: View {
         .onChange(of: sampler.videoSize) { _, newSize in
             // 오픈 경로에서 세운 플래그가 켜진 상태에서 실제 크기 확보되면 1회 실행.
             if pendingAutoResize && newSize.width > 0 && newSize.height > 0 {
-                autoResizeForVideo()
+                if autoResizeWindowToVideo {
+                    autoResizeForVideo()
+                }
                 pendingAutoResize = false
             }
         }
@@ -2097,7 +2100,7 @@ struct ContentView: View {
         recents.clear()
 
         let defaults = UserDefaults.standard
-        ["autoPlayOnOpen", "rememberPlaybackPosition", "loopMultiFilePlayback", "tapToPeek", "preventFullscreenDisplaySleep"]
+        ["autoPlayOnOpen", "rememberPlaybackPosition", "autoResizeWindowToVideo", "loopMultiFilePlayback", "tapToPeek", "preventFullscreenDisplaySleep"]
             .forEach { defaults.removeObject(forKey: $0) }
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("04dopl.") || key.hasPrefix("hurst.") {
             defaults.removeObject(forKey: key)
@@ -2112,6 +2115,7 @@ struct ContentView: View {
         tapToPeek = false
         preventFullscreenDisplaySleep = false
         rememberPlaybackPosition = false
+        autoResizeWindowToVideo = true
         accentColorRaw = AppAccentColor.defaultChoice.rawValue
         backgroundStyleRaw = BackgroundStyle.blur.rawValue
         fullscreenBackgroundStyleRaw = FullscreenBackgroundStyle.black.rawValue
