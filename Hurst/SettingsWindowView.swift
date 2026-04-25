@@ -496,11 +496,11 @@ struct ShortcutsSettingsView: View {
         .init(input: "W / S", action: "Increase or decrease dot size"),
         .init(input: "A / D", action: "Tighten or widen dot spacing"),
         .init(input: "Z", action: "Reset dot size and spacing"),
-        .init(input: "B", action: "Cycle background style"),
+        .init(input: "B", action: "Background style"),
         .init(input: "T", action: "Toggle always on top"),
-        .init(input: "P", action: "Cycle subtitle source or turn subtitles off"),
+        .init(input: "P", action: "Switch subtitle source, or turn subtitles off"),
         .init(input: "[ / ]", action: "Decrease or increase subtitle size"),
-        .init(input: "Cmd + 0", action: "Resize to half video size"),
+        .init(input: "Cmd + 0", action: "Resize video window"),
         .init(input: "Cmd + - / =", action: "Zoom window out or in")
     ]
 
@@ -512,7 +512,7 @@ struct ShortcutsSettingsView: View {
     private let playbackGestures: [ShortcutItem] = [
         .init(input: "Single Click", action: "Play, pause, or resume last media"),
         .init(input: "Right Click on Dots", action: "Jump to the clicked playback position"),
-        .init(input: "Mouse Wheel", action: "Adjust volume"),
+        .init(input: "Scroll", action: "Adjust volume"),
         .init(input: "Fullscreen Drag", action: "Adjust dot size and spacing"),
         .init(input: "Peek Dot", action: "Hold to peek, or tap-toggle when Tap to Peek is on")
     ]
