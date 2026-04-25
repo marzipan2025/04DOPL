@@ -564,6 +564,7 @@ private struct DotsOverlayView: View {
     let backgroundStyle: BackgroundStyle
     /// 풀스크린 배경 스타일. brightTextMode 계산 시 참조. 비풀스크린 모드에서는 무시됨.
     let fullscreenBackgroundStyle: FullscreenBackgroundStyle
+    let adaptiveSubtitleColor: Bool
     let backgroundStyleLabel: String?
     let isEditingURL: Bool
     let urlBuffer: String
@@ -775,6 +776,10 @@ private struct DotsOverlayView: View {
             if sampler.isAudioMode || sampler.urlLoadError != nil {
                 // 오디오/에러 모드 등 백그라운드가 도트로 덮인 상태에서는 배경 점 색상(C9CFE5)으로 고정.
                 overlayColor = Color(red: 201/255, green: 207/255, blue: 229/255)
+            } else if !adaptiveSubtitleColor {
+                overlayColor = brightTextMode
+                    ? Color.white.opacity(0.95)
+                    : Color.black.opacity(0.95)
             } else {
                 overlayColor = adaptiveColor(sR: sampR, sG: sampG, sB: sampB, n: sampN,
                                              brightMode: brightTextMode)
@@ -1048,6 +1053,7 @@ struct ContentView: View {
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
     @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
+    @AppStorage("adaptiveSubtitleColor") private var adaptiveSubtitleColor = true
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @AppStorage("04dopl.backgroundStyle") private var backgroundStyleRaw: Int = BackgroundStyle.blur.rawValue
     /// 풀스크린 전용 배경 모드. 일반 모드와 독립적으로 영속.
@@ -1331,6 +1337,7 @@ struct ContentView: View {
                 isFullscreen: isFullscreen,
                 backgroundStyle: backgroundStyle,
                 fullscreenBackgroundStyle: fullscreenBackgroundStyle,
+                adaptiveSubtitleColor: adaptiveSubtitleColor,
                 backgroundStyleLabel: backgroundStyleLabel,
                 isEditingURL: isEditingURL,
                 urlBuffer: urlBuffer,
@@ -2100,7 +2107,7 @@ struct ContentView: View {
         recents.clear()
 
         let defaults = UserDefaults.standard
-        ["autoPlayOnOpen", "rememberPlaybackPosition", "autoResizeWindowToVideo", "loopMultiFilePlayback", "tapToPeek", "preventFullscreenDisplaySleep"]
+        ["autoPlayOnOpen", "rememberPlaybackPosition", "autoResizeWindowToVideo", "adaptiveSubtitleColor", "loopMultiFilePlayback", "tapToPeek", "preventFullscreenDisplaySleep"]
             .forEach { defaults.removeObject(forKey: $0) }
         for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("04dopl.") || key.hasPrefix("hurst.") {
             defaults.removeObject(forKey: key)
@@ -2116,6 +2123,7 @@ struct ContentView: View {
         preventFullscreenDisplaySleep = false
         rememberPlaybackPosition = false
         autoResizeWindowToVideo = true
+        adaptiveSubtitleColor = true
         accentColorRaw = AppAccentColor.defaultChoice.rawValue
         backgroundStyleRaw = BackgroundStyle.blur.rawValue
         fullscreenBackgroundStyleRaw = FullscreenBackgroundStyle.black.rawValue

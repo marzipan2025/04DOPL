@@ -282,6 +282,7 @@ struct SettingsRow<Content: View>: View {
 struct GeneralSettingsView: View {
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
     @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
+    @AppStorage("adaptiveSubtitleColor") private var adaptiveSubtitleColor = true
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
     
@@ -301,7 +302,7 @@ struct GeneralSettingsView: View {
             }
 
             SettingsSection("Appearance") {
-                SettingsRow("Accent Color", showDivider: false, extraVerticalPadding: 4) {
+                SettingsRow("Accent Color", extraVerticalPadding: 4) {
                     HStack(spacing: 13) {
                         ForEach(AppAccentColor.allCases) { choice in
                             AccentColorSwatch(
@@ -312,6 +313,11 @@ struct GeneralSettingsView: View {
                             }
                         }
                     }
+                }
+                SettingsRow("Adaptive Subtitle Color", showDivider: false) {
+                    Toggle("", isOn: $adaptiveSubtitleColor)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
                 }
             }
 
