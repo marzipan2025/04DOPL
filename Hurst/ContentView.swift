@@ -2420,7 +2420,7 @@ struct ContentView: View {
         }
     }
 
-    /// c: 자막 토글. 트랙이 있고 ON→OFF일 때만 CAPTION OFF 악센트 레이블.
+    /// c: 자막 토글. 트랙이 있고 ON→OFF일 때만 SUBTITLE OFF 악센트 레이블.
     private func toggleSubtitlesWithLabel() {
         sampler.toggleSubtitles()
         if let label = sampler.subtitleModeLabel {

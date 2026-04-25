@@ -399,11 +399,11 @@ class VideoSampler: ObservableObject {
     var subtitleModeLabel: String? {
         switch effectiveSubtitleMode() {
         case .off:
-            return hasSubtitles ? "CAPTION OFF" : nil
+            return hasSubtitles ? "SUBTITLE OFF" : nil
         case .embedded:
-            return "CAPTION EMBEDDED"
+            return "SUBTITLE EMBEDDED"
         case .external:
-            return "CAPTION EXTERNAL"
+            return "SUBTITLE EXTERNAL"
         }
     }
 
