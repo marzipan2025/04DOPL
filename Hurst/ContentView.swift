@@ -761,25 +761,30 @@ private struct DotsOverlayView: View {
         let brightTextMode = isFullscreen
             ? fullscreenBackgroundStyle.needsBrightText
             : backgroundStyle.hasBlackOverlay
+        let fixedOverlayColor = brightTextMode
+            ? Color.white.opacity(0.95)
+            : Color.black.opacity(0.95)
         let overlayColor: Color
         if backgroundStyleLabel != nil {
-            overlayColor = accentColor
+            overlayColor = adaptiveSubtitleColor ? accentColor : fixedOverlayColor
         } else if isPlaceholder {
             if isEditingURL || subtitlePromptActive {
                 // 대기화면에서 URL 편집/자막 프롬프트 시 버튼(X, GO 등)과 동일한 색상 사용
-                overlayColor = adaptiveColor(sR: sampR, sG: sampG, sB: sampB, n: sampN,
-                                             brightMode: brightTextMode)
+                overlayColor = adaptiveSubtitleColor
+                    ? adaptiveColor(sR: sampR, sG: sampG, sB: sampB, n: sampN,
+                                    brightMode: brightTextMode)
+                    : fixedOverlayColor
             } else {
                 overlayColor = placeholderColor
             }
         } else if overlayIsSubtitle {
             if sampler.isAudioMode || sampler.urlLoadError != nil {
                 // 오디오/에러 모드 등 백그라운드가 도트로 덮인 상태에서는 배경 점 색상(C9CFE5)으로 고정.
-                overlayColor = Color(red: 201/255, green: 207/255, blue: 229/255)
+                overlayColor = adaptiveSubtitleColor
+                    ? Color(red: 201/255, green: 207/255, blue: 229/255)
+                    : fixedOverlayColor
             } else if !adaptiveSubtitleColor {
-                overlayColor = brightTextMode
-                    ? Color.white.opacity(0.95)
-                    : Color.black.opacity(0.95)
+                overlayColor = fixedOverlayColor
             } else {
                 overlayColor = adaptiveColor(sR: sampR, sG: sampG, sB: sampB, n: sampN,
                                              brightMode: brightTextMode)
@@ -805,8 +810,10 @@ private struct DotsOverlayView: View {
 
         // "CANCEL" 또는 "X  GO" — 모두 같은 적응형 색으로 렌더 (단일 Text).
         if let rr = rightBlockRect, !rightText.isEmpty {
-            let color = adaptiveColor(sR: sampR2, sG: sampG2, sB: sampB2, n: sampN2,
-                                      brightMode: brightTextMode)
+            let color = adaptiveSubtitleColor
+                ? adaptiveColor(sR: sampR2, sG: sampG2, sB: sampB2, n: sampN2,
+                                brightMode: brightTextMode)
+                : fixedOverlayColor
             let resolved = context.resolve(
                 Text(rightText)
                     .font(.custom(dotsFontName(forSize: sampler.subtitleFontSize), size: sampler.subtitleFontSize))
