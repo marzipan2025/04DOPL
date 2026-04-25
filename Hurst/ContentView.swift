@@ -2403,11 +2403,9 @@ struct ContentView: View {
 
     /// c: 자막 토글. 트랙이 있고 ON→OFF일 때만 CAPTION OFF 악센트 레이블.
     private func toggleSubtitlesWithLabel() {
-        let hadTrack = sampler.hasSubtitles
-        let wasOn = sampler.showSubtitles
         sampler.toggleSubtitles()
-        if hadTrack && wasOn && !sampler.showSubtitles {
-            showTransientAccentLabel("CAPTION OFF")
+        if let label = sampler.subtitleModeLabel {
+            showTransientAccentLabel(label)
         }
     }
 

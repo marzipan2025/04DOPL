@@ -498,7 +498,7 @@ struct ShortcutsSettingsView: View {
         .init(input: "Z", action: "Reset dot size and spacing"),
         .init(input: "B", action: "Cycle background style"),
         .init(input: "T", action: "Toggle always on top"),
-        .init(input: "P", action: "Toggle subtitles"),
+        .init(input: "P", action: "Cycle subtitle source or turn subtitles off"),
         .init(input: "[ / ]", action: "Decrease or increase subtitle size"),
         .init(input: "Cmd + 0", action: "Resize to half video size"),
         .init(input: "Cmd + - / =", action: "Zoom window out or in")

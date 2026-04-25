@@ -50,10 +50,16 @@ class VideoSampler: ObservableObject {
     @Published var showSubtitles: Bool = true
     @Published var currentSubtitle: String = ""
     @Published var hasExternalSubtitle: Bool = false
+    private enum SubtitleMode: Equatable {
+        case off
+        case embedded
+        case external
+    }
+    private var subtitleMode: SubtitleMode = .off
     private var legibleGroup: AVMediaSelectionGroup?
     private var firstLegibleOption: AVMediaSelectionOption?
     private var hasEmbeddedSubtitle: Bool = false
-    // 외부 자막(.srt, .smi). 로드 시 embedded 보다 우선. 'c' 로 OFF 시 메모리에서 제거.
+    // 외부 자막(.srt, .smi). 로드 시 embedded 보다 우선.
     private var externalCues: [SubtitleCue] = []
     private var externalTimeObserver: Any?
 
@@ -288,12 +294,12 @@ class VideoSampler: ObservableObject {
         }
 
         // legible(자막) 트랙 탐지 및 자동 선택
-        Task { [weak self, weak item] in
+        Task { [weak self] in
             guard let self else { return }
             do {
                 let group = try await asset.loadMediaSelectionGroup(for: .legible)
                 await MainActor.run {
-                    guard let group, let item else { return }
+                    guard let group else { return }
                     let options = group.options.filter {
                         !$0.hasMediaCharacteristic(.containsOnlyForcedSubtitles)
                     }
@@ -301,13 +307,14 @@ class VideoSampler: ObservableObject {
                     self.firstLegibleOption = options.first
                     self.hasEmbeddedSubtitle = !options.isEmpty
                     self.updateHasSubtitlesFlag()
-                    // 외부 자막이 이미 걸려 있으면 embedded 자동 선택 금지 (우선순위: 외부 > 내부)
-                    if self.showSubtitles && !self.hasExternalSubtitle,
-                       let first = options.first {
-                        item.select(first, in: group)
+                    if self.hasExternalSubtitle {
+                        self.subtitleMode = .external
+                    } else if self.showSubtitles && !options.isEmpty {
+                        self.subtitleMode = .embedded
                     } else {
-                        item.select(nil, in: group)
+                        self.subtitleMode = .off
                     }
+                    self.applySubtitleMode()
                 }
             } catch {
                 // legible 그룹이 없는 자산은 정상(자막 없음)
@@ -335,29 +342,15 @@ class VideoSampler: ObservableObject {
     }
 
     /// 자막 표시 토글. 자막 트랙(내장/외장 어느 쪽이든)이 없으면 아무 일도 하지 않음.
-    /// ON→OFF 전환 시 외부 자막은 메모리에서 초기화됨 (사양). 다시 ON 하면 내장 자막만 남음.
+    /// 외부/내장 자막이 모두 있으면 외부 → 내장 → OFF 순서로 순환한다.
     func toggleSubtitles() {
-        guard hasSubtitles else { return }
-        if showSubtitles {
-            // OFF
-            showSubtitles = false
-            if hasExternalSubtitle {
-                clearExternalSubtitleState()
-            }
-            if let item = player?.currentItem, let group = legibleGroup {
-                item.select(nil, in: group)
-            }
-            currentSubtitle = ""
-        } else {
-            // ON — 이 시점에는 외부 자막이 이미 비워져 있음. 내장 자막이 있다면 그걸 사용.
-            showSubtitles = true
-            if hasEmbeddedSubtitle,
-               let item = player?.currentItem,
-               let group = legibleGroup,
-               let opt = firstLegibleOption {
-                item.select(opt, in: group)
-            }
-        }
+        let modes = availableSubtitleModesInCycleOrder()
+        guard !modes.isEmpty else { return }
+
+        let current = effectiveSubtitleMode()
+        let nextIndex = modes.firstIndex(of: current).map { ($0 + 1) % modes.count } ?? 0
+        subtitleMode = modes[nextIndex]
+        applySubtitleMode()
     }
 
     // MARK: - External Subtitle (.srt / .smi)
@@ -379,20 +372,12 @@ class VideoSampler: ObservableObject {
         removeExternalTimeObserver()
         externalCues = cues
         hasExternalSubtitle = true
-        showSubtitles = true
         updateHasSubtitlesFlag()
-
-        // 내장 자막이 활성화되어 있으면 해제 (외부 우선)
-        if let item = player?.currentItem, let group = legibleGroup {
-            item.select(nil, in: group)
-        }
+        subtitleMode = .external
+        showSubtitles = true
 
         installExternalTimeObserver()
-
-        // 즉시 현재 시간에 맞는 큐 표시 (observer 첫 tick을 기다리지 않음)
-        if let current = player?.currentTime().seconds {
-            updateExternalSubtitle(at: current)
-        }
+        applySubtitleMode()
         return true
     }
 
@@ -401,10 +386,78 @@ class VideoSampler: ObservableObject {
         externalCues = []
         hasExternalSubtitle = false
         updateHasSubtitlesFlag()
+        if subtitleMode == .external {
+            subtitleMode = hasEmbeddedSubtitle && showSubtitles ? .embedded : .off
+        }
+        applySubtitleMode()
     }
 
     private func updateHasSubtitlesFlag() {
         hasSubtitles = hasEmbeddedSubtitle || hasExternalSubtitle
+    }
+
+    var subtitleModeLabel: String? {
+        switch effectiveSubtitleMode() {
+        case .off:
+            return hasSubtitles ? "CAPTION OFF" : nil
+        case .embedded:
+            return "CAPTION EMBEDDED"
+        case .external:
+            return "CAPTION EXTERNAL"
+        }
+    }
+
+    private func availableSubtitleModesInCycleOrder() -> [SubtitleMode] {
+        var modes: [SubtitleMode] = []
+        if hasExternalSubtitle { modes.append(.external) }
+        if hasEmbeddedSubtitle { modes.append(.embedded) }
+        if !modes.isEmpty { modes.append(.off) }
+        return modes
+    }
+
+    private func effectiveSubtitleMode() -> SubtitleMode {
+        switch subtitleMode {
+        case .embedded where hasEmbeddedSubtitle:
+            return .embedded
+        case .external where hasExternalSubtitle:
+            return .external
+        default:
+            return .off
+        }
+    }
+
+    private func applySubtitleMode() {
+        let mode = effectiveSubtitleMode()
+        subtitleMode = mode
+        showSubtitles = mode != .off
+
+        if let item = player?.currentItem, let group = legibleGroup {
+            switch mode {
+            case .embedded:
+                if let opt = firstLegibleOption {
+                    item.select(opt, in: group)
+                } else {
+                    item.select(nil, in: group)
+                }
+                currentSubtitle = ""
+
+            case .external:
+                item.select(nil, in: group)
+                if let current = player?.currentTime().seconds {
+                    updateExternalSubtitle(at: current)
+                } else {
+                    currentSubtitle = ""
+                }
+
+            case .off:
+                item.select(nil, in: group)
+                currentSubtitle = ""
+            }
+        } else if mode == .external, let current = player?.currentTime().seconds {
+            updateExternalSubtitle(at: current)
+        } else {
+            currentSubtitle = ""
+        }
     }
 
     private func removeExternalTimeObserver() {
@@ -1296,6 +1349,7 @@ class VideoSampler: ObservableObject {
         removeExternalTimeObserver()
         externalCues = []
         hasExternalSubtitle = false
+        subtitleMode = .off
         player?.pause()
         player = nil
         videoOutput = nil
