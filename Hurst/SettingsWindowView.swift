@@ -477,12 +477,21 @@ private struct ShortcutRow: View {
 }
 
 struct ShortcutsSettingsView: View {
-    private let keyInputs: [ShortcutItem] = [
-        .init(input: "Space or Click", action: "Play, pause, or resume last media"),
-        .init(input: "Return or Double Click", action: "Toggle fullscreen"),
+    private let generalKeyInputs: [ShortcutItem] = [
+        .init(input: "Cmd + O", action: "Open file"),
+        .init(input: "Cmd + U", action: "Open URL"),
+        .init(input: "Cmd + I", action: "Open playback info"),
+        .init(input: "Cmd + P", action: "Open subtitle file"),
+        .init(input: "Cmd + ,", action: "Open settings")
+    ]
+
+    private let playbackKeyInputs: [ShortcutItem] = [
+        .init(input: "Space", action: "Play, pause, or resume last media"),
+        .init(input: "Return", action: "Toggle fullscreen"),
         .init(input: "Left / Right", action: "Seek backward or forward by 10 seconds"),
         .init(input: "Shift + Left / Right", action: "Open previous or next file"),
         .init(input: ", / .", action: "Move one timeline column left or right"),
+        .init(input: "0 to 9", action: "Jump to 0% through 90% of playback"),
         .init(input: "Up / Down", action: "Raise or lower volume"),
         .init(input: "W / S", action: "Increase or decrease dot size"),
         .init(input: "A / D", action: "Tighten or widen dot spacing"),
@@ -491,32 +500,46 @@ struct ShortcutsSettingsView: View {
         .init(input: "T", action: "Toggle always on top"),
         .init(input: "P", action: "Toggle subtitles"),
         .init(input: "[ / ]", action: "Decrease or increase subtitle size"),
-        .init(input: "0 to 9", action: "Jump to 0% through 90% of playback"),
-        .init(input: "Cmd + O / U / I / P", action: "Open file, URL, playback info, or subtitle file"),
-        .init(input: "Cmd + , / 0 / - / =", action: "Open settings, half video size, zoom out, or zoom in")
+        .init(input: "Cmd + 0", action: "Resize to half video size"),
+        .init(input: "Cmd + - / =", action: "Zoom window out or in")
     ]
 
-    private let gestures: [ShortcutItem] = [
+    private let generalGestures: [ShortcutItem] = [
+        .init(input: "Drop File on Window", action: "Open media or replace the current file"),
+        .init(input: "Double Click", action: "Toggle fullscreen")
+    ]
+
+    private let playbackGestures: [ShortcutItem] = [
         .init(input: "Single Click", action: "Play, pause, or resume last media"),
-        .init(input: "Double Click", action: "Toggle fullscreen"),
         .init(input: "Right Click on Dots", action: "Jump to the clicked playback position"),
         .init(input: "Mouse Wheel", action: "Adjust volume"),
-        .init(input: "Drop File on Window", action: "Open or replace media"),
         .init(input: "Fullscreen Drag", action: "Adjust dot size and spacing"),
         .init(input: "Peek Dot", action: "Hold to peek, or tap-toggle when Tap to Peek is on")
     ]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            SettingsSection("Key Inputs") {
-                ForEach(Array(keyInputs.enumerated()), id: \.element.id) { index, item in
-                    ShortcutRow(item: item, showDivider: index < keyInputs.count - 1)
+            SettingsSection("General Inputs") {
+                ForEach(Array(generalKeyInputs.enumerated()), id: \.element.id) { index, item in
+                    ShortcutRow(item: item, showDivider: index < generalKeyInputs.count - 1)
                 }
             }
 
-            SettingsSection("Gestures") {
-                ForEach(Array(gestures.enumerated()), id: \.element.id) { index, item in
-                    ShortcutRow(item: item, showDivider: index < gestures.count - 1)
+            SettingsSection("Playback Inputs") {
+                ForEach(Array(playbackKeyInputs.enumerated()), id: \.element.id) { index, item in
+                    ShortcutRow(item: item, showDivider: index < playbackKeyInputs.count - 1)
+                }
+            }
+
+            SettingsSection("General Gestures") {
+                ForEach(Array(generalGestures.enumerated()), id: \.element.id) { index, item in
+                    ShortcutRow(item: item, showDivider: index < generalGestures.count - 1)
+                }
+            }
+
+            SettingsSection("Playback Gestures") {
+                ForEach(Array(playbackGestures.enumerated()), id: \.element.id) { index, item in
+                    ShortcutRow(item: item, showDivider: index < playbackGestures.count - 1)
                 }
             }
         }
