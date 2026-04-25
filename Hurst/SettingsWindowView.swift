@@ -410,7 +410,7 @@ struct PlaybackSettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsSection("Playback") {
-                SettingsRow("Loop Multi Files") {
+                SettingsRow("Playback Loop") {
                     Toggle("", isOn: $loopMultiFilePlayback)
                         .labelsHidden()
                         .toggleStyle(.switch)

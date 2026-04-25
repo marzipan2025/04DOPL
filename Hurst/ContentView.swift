@@ -1805,13 +1805,13 @@ struct ContentView: View {
         sampler.triggerBorderBlink()
     }
 
-    /// 플레이리스트 자동 전진 (영상 종료 시). 멀티 파일 루프가 켜져 있으면 마지막에서 처음으로 돌아간다.
+    /// 플레이리스트 자동 전진 (재생 종료 시). 루프가 켜져 있으면 단일 파일도 포함해 마지막에서 처음으로 돌아간다.
     private func advancePlaylist() {
         clearStoredPlaybackPosition(for: currentPlaybackPositionKey)
         let next = playlistIndex + 1
         if next < playlist.count {
             openPlaylistItem(at: next, searchStep: 1)
-        } else if loopMultiFilePlayback && playlist.count > 1 {
+        } else if loopMultiFilePlayback && !playlist.isEmpty {
             openPlaylistItem(at: 0, searchStep: 1)
         }
     }
