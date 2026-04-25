@@ -1217,6 +1217,11 @@ struct ContentView: View {
         recents.addURL(urlString, title: normalizedTitle.isEmpty ? nil : normalizedTitle)
     }
 
+    private func prepareForURLPlayback() {
+        playlist = []
+        playlistIndex = 0
+    }
+
     /// 대기 상태 + 저장값 존재하면 복원. 아니면 false.
     /// 복원 실패(파일 이동/삭제, URL 오류)는 sampler 내부 urlLoadError 경유로 알림 —
     /// 저장값은 건드리지 않음(일시적 오프라인 가능성).
@@ -1245,6 +1250,7 @@ struct ContentView: View {
             openFiles(urls, recordRecent: false, rememberAsLast: false)
             return true
         case "url":
+            prepareForURLPlayback()
             let key = playbackPositionKey(forURLString: lastMediaValue)
             currentPlaybackPositionKey = key
             pendingAutoResize = true
@@ -1943,6 +1949,7 @@ struct ContentView: View {
             persistCurrentPlaybackPositionIfNeeded()
             endPeekIfNeeded()
             rememberLastURL(trimmed)
+            prepareForURLPlayback()
             let key = playbackPositionKey(forURLString: trimmed)
             currentPlaybackPositionKey = key
             pendingAutoResize = true
@@ -1984,6 +1991,7 @@ struct ContentView: View {
         persistCurrentPlaybackPositionIfNeeded()
         endPeekIfNeeded()
         rememberLastURL(value, title: displayTitle)
+        prepareForURLPlayback()
         let key = playbackPositionKey(forURLString: value)
         currentPlaybackPositionKey = key
         pendingAutoResize = true
@@ -2088,6 +2096,7 @@ struct ContentView: View {
             persistCurrentPlaybackPositionIfNeeded()
             endPeekIfNeeded()
             rememberLastURL(value, title: title)
+            prepareForURLPlayback()
             let key = playbackPositionKey(forURLString: value)
             currentPlaybackPositionKey = key
             pendingAutoResize = true
