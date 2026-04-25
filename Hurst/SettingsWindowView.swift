@@ -59,6 +59,7 @@ struct SettingsWindowView: View {
     enum SettingsTab: String, CaseIterable, Identifiable {
         case general = "General"
         case playback = "Playback"
+        case shortcuts = "Shortcuts"
         case licences = "Licences"
         
         var id: String { self.rawValue }
@@ -67,6 +68,7 @@ struct SettingsWindowView: View {
             switch self {
             case .general:    return "gearshape.fill"
             case .playback:   return "play.rectangle.fill"
+            case .shortcuts:  return "command"
             case .licences:   return "doc.text.fill"
             }
         }
@@ -75,6 +77,7 @@ struct SettingsWindowView: View {
             switch self {
             case .general:    return .purple
             case .playback:   return .blue
+            case .shortcuts:  return .mint
             case .licences:   return .orange
             }
         }
@@ -167,6 +170,8 @@ struct SettingsWindowView: View {
                             GeneralSettingsView()
                         case .playback:
                             PlaybackSettingsView()
+                        case .shortcuts:
+                            ShortcutsSettingsView()
                         case .licences:
                             LicencesSettingsView()
                         }
@@ -191,6 +196,8 @@ private extension SettingsWindowView.SettingsTab {
             return "Core app behavior and launch defaults"
         case .playback:
             return "Behaviors and Controls"
+        case .shortcuts:
+            return "Key inputs and gestures"
         case .licences:
             return "Third-party Licenses and copyrights"
         }
@@ -427,6 +434,89 @@ struct PlaybackSettingsView: View {
                     Toggle("", isOn: $preventFullscreenDisplaySleep)
                         .labelsHidden()
                         .toggleStyle(.switch)
+                }
+            }
+        }
+    }
+}
+
+private struct ShortcutItem: Identifiable {
+    let id = UUID()
+    let input: String
+    let action: String
+}
+
+private struct ShortcutRow: View {
+    let item: ShortcutItem
+    let showDivider: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 16) {
+                Text(item.action)
+                    .font(SettingsFont.regular(16))
+
+                Spacer()
+
+                Text(item.input)
+                    .font(SettingsFont.regular(13))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+
+            if showDivider {
+                Rectangle()
+                    .fill(settingsDividerColor)
+                    .frame(height: 1)
+                    .padding(.horizontal, 16)
+            }
+        }
+    }
+}
+
+struct ShortcutsSettingsView: View {
+    private let keyInputs: [ShortcutItem] = [
+        .init(input: "Space or Click", action: "Play, pause, or resume last media"),
+        .init(input: "Return or Double Click", action: "Toggle fullscreen"),
+        .init(input: "Left / Right", action: "Seek backward or forward by 10 seconds"),
+        .init(input: "Shift + Left / Right", action: "Open previous or next file"),
+        .init(input: ", / .", action: "Move one timeline column left or right"),
+        .init(input: "Up / Down", action: "Raise or lower volume"),
+        .init(input: "W / S", action: "Increase or decrease dot size"),
+        .init(input: "A / D", action: "Tighten or widen dot spacing"),
+        .init(input: "Z", action: "Reset dot size and spacing"),
+        .init(input: "B", action: "Cycle background style"),
+        .init(input: "T", action: "Toggle always on top"),
+        .init(input: "P", action: "Toggle subtitles"),
+        .init(input: "[ / ]", action: "Decrease or increase subtitle size"),
+        .init(input: "0 to 9", action: "Jump to 0% through 90% of playback"),
+        .init(input: "Cmd + O / U / I / P", action: "Open file, URL, playback info, or subtitle file"),
+        .init(input: "Cmd + , / 0 / - / =", action: "Open settings, half video size, zoom out, or zoom in")
+    ]
+
+    private let gestures: [ShortcutItem] = [
+        .init(input: "Single Click", action: "Play, pause, or resume last media"),
+        .init(input: "Double Click", action: "Toggle fullscreen"),
+        .init(input: "Right Click on Dots", action: "Jump to the clicked playback position"),
+        .init(input: "Mouse Wheel", action: "Adjust volume"),
+        .init(input: "Drop File on Window", action: "Open or replace media"),
+        .init(input: "Fullscreen Drag", action: "Adjust dot size and spacing"),
+        .init(input: "Peek Dot", action: "Hold to peek, or tap-toggle when Tap to Peek is on")
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            SettingsSection("Key Inputs") {
+                ForEach(Array(keyInputs.enumerated()), id: \.element.id) { index, item in
+                    ShortcutRow(item: item, showDivider: index < keyInputs.count - 1)
+                }
+            }
+
+            SettingsSection("Gestures") {
+                ForEach(Array(gestures.enumerated()), id: \.element.id) { index, item in
+                    ShortcutRow(item: item, showDivider: index < gestures.count - 1)
                 }
             }
         }
