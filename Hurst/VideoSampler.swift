@@ -401,9 +401,9 @@ class VideoSampler: ObservableObject {
         case .off:
             return hasSubtitles ? "SUBTITLE OFF" : nil
         case .embedded:
-            return "SUBTITLE EMBEDDED"
+            return "EMBEDDED SUB"
         case .external:
-            return "SUBTITLE EXTERNAL"
+            return "EXTERNAL SUB"
         }
     }
 
