@@ -129,6 +129,7 @@ struct SettingsWindowView: View {
                         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
                     .buttonStyle(.plain)
+                    .focusable(false)
                 }
             }
             .padding(.horizontal, 8)

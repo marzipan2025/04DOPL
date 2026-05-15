@@ -484,6 +484,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.standardWindowButton(.closeButton)?.isHidden = false
         window.standardWindowButton(.miniaturizeButton)?.isHidden = false
         window.standardWindowButton(.zoomButton)?.isHidden = false
+        repositionSettingsWindowButtons(window)
+        DispatchQueue.main.async {
+            repositionSettingsWindowButtons(window)
+        }
 
         if let cv = window.contentView {
             cv.wantsLayer = true
@@ -497,6 +501,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 themeFrame.layer?.masksToBounds = false
             }
         }
+    }
+
+    private static func repositionSettingsWindowButtons(_ window: NSWindow) {
+        guard
+            let closeButton = window.standardWindowButton(.closeButton),
+            let minimizeButton = window.standardWindowButton(.miniaturizeButton),
+            let zoomButton = window.standardWindowButton(.zoomButton),
+            let titlebarView = closeButton.superview
+        else { return }
+
+        let closeFrame = closeButton.frame
+        let minimizeOffset = minimizeButton.frame.minX - closeFrame.minX
+        let zoomOffset = zoomButton.frame.minX - closeFrame.minX
+        let leftInset: CGFloat = 17
+        let topInset: CGFloat = 20
+        let targetY: CGFloat
+
+        if titlebarView.isFlipped {
+            targetY = topInset
+        } else {
+            targetY = titlebarView.bounds.height - topInset - closeFrame.height
+        }
+
+        closeButton.setFrameOrigin(NSPoint(x: leftInset, y: targetY))
+        minimizeButton.setFrameOrigin(NSPoint(x: leftInset + minimizeOffset, y: targetY))
+        zoomButton.setFrameOrigin(NSPoint(x: leftInset + zoomOffset, y: targetY))
     }
 
     static func applyStyle(_ window: NSWindow) {
