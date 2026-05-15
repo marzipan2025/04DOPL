@@ -34,7 +34,7 @@ DYLIB_SOURCES=(
   "/opt/homebrew/opt/opus/lib/libopus.0.dylib"
   "/opt/homebrew/opt/svt-av1/lib/libSvtAv1Enc.4.dylib"
   "/opt/homebrew/opt/x264/lib/libx264.165.dylib"
-  "/opt/homebrew/opt/x265/lib/libx265.215.dylib"
+  "/opt/homebrew/opt/x265/lib/libx265.216.dylib"
 )
 
 fix_homebrew_refs() {
