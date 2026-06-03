@@ -336,9 +336,13 @@ class VideoSampler: ObservableObject {
 
         // 재생 시작(play / isPlaying)은 위 Task 내부 조건(분석 완료 후 등)으로 이동됨.
 
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.sampleCurrentFrame() }
         }
+        // .common 모드로 등록 → 마우스 홀드(일반 peek) 등 이벤트 트래킹 중에도 계속 샘플링.
+        // (.default 모드 타이머는 마우스를 누르고 있는 동안 멈춰 dotColors가 동결됨)
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     /// 자막 표시 토글. 자막 트랙(내장/외장 어느 쪽이든)이 없으면 아무 일도 하지 않음.
@@ -709,9 +713,13 @@ class VideoSampler: ObservableObject {
         videoSize = CGSize(width: cgImage.width, height: cgImage.height)
 
         // 이미지 모드에서는 AVPlayer/videoOutput 없이 캐시된 버퍼를 반복 샘플링.
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.sampleCurrentFrame() }
         }
+        // .common 모드로 등록 → 마우스 홀드(일반 peek) 등 이벤트 트래킹 중에도 계속 샘플링.
+        // (.default 모드 타이머는 마우스를 누르고 있는 동안 멈춰 dotColors가 동결됨)
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     /// CGImage → CVPixelBuffer(BGRA). 기존 샘플링 경로(`sampleCurrentFrame`)와 호환되는 포맷.
@@ -1071,9 +1079,13 @@ class VideoSampler: ObservableObject {
 
     private func startTimerIfNeeded() {
         guard timer == nil else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in self?.sampleCurrentFrame() }
         }
+        // .common 모드로 등록 → 마우스 홀드(일반 peek) 등 이벤트 트래킹 중에도 계속 샘플링.
+        // (.default 모드 타이머는 마우스를 누르고 있는 동안 멈춰 dotColors가 동결됨)
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     private func showOverlay(_ effect: OverlayEffect, blinks: Int, alert: Bool = false) {

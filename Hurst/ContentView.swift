@@ -824,9 +824,14 @@ private struct DotsOverlayView: View {
                 // 우측 마진만 1px 줄임(좌측 padX 유지, 폭에서 1 차감).
                 let capRect = CGRect(x: sr.minX - padX, y: inkCenterY - capH / 2,
                                      width: sr.width + padX * 2 - 1, height: capH)
+                // 자막 뒤 장면색(샘플 평균)을 색면 hue 소스로 전달 → 유채색 색면.
+                let sceneColor: Color? = sampN > 0
+                    ? Color(.sRGB, red: sampR / Double(sampN),
+                            green: sampG / Double(sampN), blue: sampB / Double(sampN))
+                    : nil
                 context.fill(
                     Path(roundedRect: capRect, cornerRadius: cornerR),
-                    with: .color(subtitleBackdropColor(from: overlayColor))
+                    with: .color(subtitleBackdropColor(from: overlayColor, scene: sceneColor))
                 )
             }
             let lineH = sampler.subtitleFontSize * 1.08
@@ -1062,24 +1067,38 @@ private struct DotsOverlayView: View {
         }
     }
 
-    /// peek 자막 배경 캡슐 색면.
-    /// - 기본은 글씨색을 40% 어둡게(×0.6)한 틴트지만, 글씨색과의 WCAG 대비비가
-    ///   부족하면 더 어둡히거나(밝은 글씨) 밝은 쪽으로 전환해(어두운 글씨) 대비를 확보한다.
+    /// peek 자막 배경 캡슐 색면. (유채색 유지가 목표)
+    /// - 색상(hue)은 자막 뒤 장면색에서 가져오고, 장면이 무채색이면 accent 색으로 폴백 →
+    ///   흰/검 글씨처럼 글씨가 무채색이어도 색면은 항상 유채색이 된다.
+    /// - 검정/흰색으로 섞지 않고 HSB에서 채도(S)는 최대로 둔 채 밝기(V)만(또는 V=1 고정 후 S만)
+    ///   조정해, "대비를 만족하는 가장 선명한 색"을 고른다.
     /// - 캡슐이 반투명이라 뒤 영상이 비치므로 "영상이 글씨색으로 비치는 최악의 경우"
-    ///   (= α·배경 + (1−α)·글씨)까지 가정한다. 기본 α(0.5)로 부족한 중간톤 글씨에 한해
-    ///   필요한 최소한으로만 불투명도를 올려 대비비 ≥ 3:1(WCAG 2.0 AA 큰 텍스트)을 확보한다.
-    private func subtitleBackdropColor(from textColor: Color) -> Color {
+    ///   (= α·배경 + (1−α)·글씨)까지 가정해 대비비 ≥ 3:1(WCAG 2.0 AA 큰 텍스트)을 확보한다.
+    private func subtitleBackdropColor(from textColor: Color, scene sceneColor: Color?) -> Color {
         let ns = NSColor(textColor).usingColorSpace(.sRGB) ?? NSColor(textColor)
         let tr = Double(ns.redComponent), tg = Double(ns.greenComponent), tb = Double(ns.blueComponent)
         let target = 3.0            // WCAG 2.0 AA (큰 텍스트) 3:1
-        let baseAlpha = 0.5         // 기본 반투명도
-        let chromaBoost = 4.0       // 틴트 채도 극대화 (adaptiveColor 와 동일 배수)
+        let baseAlpha = 0.55        // 기본 반투명도
 
         func lin(_ c: Double) -> Double {
             c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
         }
         func luminance(_ c: (Double, Double, Double)) -> Double {
             0.2126 * lin(c.0) + 0.7152 * lin(c.1) + 0.0722 * lin(c.2)
+        }
+        func hsvToRgb(_ h: Double, _ s: Double, _ v: Double) -> (Double, Double, Double) {
+            if s <= 0 { return (v, v, v) }
+            let h6 = (h - floor(h)) * 6
+            let i = floor(h6), f = h6 - i
+            let p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f))
+            switch Int(i) % 6 {
+            case 0:  return (v, t, p)
+            case 1:  return (q, v, p)
+            case 2:  return (p, v, t)
+            case 3:  return (p, q, v)
+            case 4:  return (t, p, v)
+            default: return (v, p, q)
+            }
         }
         let lText = luminance((tr, tg, tb))
         // base 색면을 α로 합성하되, 뒤 영상이 글씨색이라는 최악 가정으로 유효색을 만든다.
@@ -1092,37 +1111,54 @@ private struct DotsOverlayView: View {
             return (hi + 0.05) / (lo + 0.05)
         }
 
-        // 1) 검정·흰색 중 대비를 더 키울 수 있는 방향 선택. (불투명 기준 상한 비교)
+        // 색상(hue) 소스 우선순위:
+        //  1) 폰트색이 유채색(=adaptive on)이면 그 hue → 색면이 폰트 색 변화와 실시간 동기.
+        //  2) 폰트가 무채색(흰/검, adaptive off)이면 장면색 hue.
+        //  3) 둘 다 무채색이면 accent 색.
+        // 폰트색은 adaptiveColor 가 채도를 부스트한 값이라 장면을 그대로 추종하므로,
+        // 이를 기준으로 삼아야 폰트와 배경면이 같은 타이밍에 함께 바뀐다.
+        func hue(of color: Color?) -> (h: Double, s: Double)? {
+            guard let color, let c = NSColor(color).usingColorSpace(.sRGB) else { return nil }
+            return (Double(c.hueComponent), Double(c.saturationComponent))
+        }
+        let textHue = hue(of: textColor)
+        let sceneHueV = hue(of: sceneColor)
+        let pickedHue: Double
+        if let th = textHue, th.s > 0.15 {
+            pickedHue = th.h
+        } else if let sh = sceneHueV, sh.s > 0.15 {
+            pickedHue = sh.h
+        } else {
+            pickedHue = hue(of: accentColor)?.h ?? 0
+        }
+
+        // 어두운 글씨면 밝은 색면, 밝은 글씨면 어두운 색면 쪽이 대비를 더 키운다.
         let darkDirection = (lText + 0.05) / 0.05 >= 1.05 / (lText + 0.05)
-        let extreme: (Double, Double, Double) = darkDirection ? (0, 0, 0) : (1, 1, 1)
-        // 채도 강조: 휘도 축에서 각 채널을 boost 배만큼 확장해 더 선명한 틴트로.
-        // (회색/흰/검 등 무채색은 확장할 채도가 없어 그대로 — 자연스러움)
-        func clamp01(_ v: Double) -> Double { Swift.max(0, Swift.min(1, v)) }
-        let lAvg = 0.2126 * tr + 0.7152 * tg + 0.0722 * tb
-        let src = (clamp01(lAvg + (tr - lAvg) * chromaBoost),
-                   clamp01(lAvg + (tg - lAvg) * chromaBoost),
-                   clamp01(lAvg + (tb - lAvg) * chromaBoost))
-        func makeBase(_ amt: Double) -> (Double, Double, Double) {
-            darkDirection
-                ? (src.0 * (1 - amt), src.1 * (1 - amt), src.2 * (1 - amt))            // 검정 쪽
-                : (src.0 + (1 - src.0) * amt, src.1 + (1 - src.1) * amt, src.2 + (1 - src.2) * amt) // 흰색 쪽
-        }
-        let minAmt = darkDirection ? 0.4 : 0.0   // 어둡게 방향은 최소 40% 유지
 
-        // 2) α=0.7 에서 색 이동만으로 목표 대비 가능하면 그대로 (가장 반투명).
+        // 가장 선명한(채도 최대) 색을 유지하면서 대비를 맞춘다.
+        //  - 밝은 글씨(어두운 색면): S=1 고정, 대비를 만족하는 "가장 밝은(=가장 선명한) V" 선택.
+        //  - 어두운 글씨(밝은 색면): V=1 고정, 대비를 만족하는 "가장 채도 높은 S" 선택.
+        let satScale = 0.7          // 채도 = 최대치의 70% (과채도 완화)
+        let extreme = darkDirection ? hsvToRgb(pickedHue, satScale, 0)   // 검정 (V=0)
+                                    : hsvToRgb(pickedHue, 0, 1)          // 흰색
         if contrastWorst(extreme, baseAlpha) >= target {
-            if contrastWorst(makeBase(minAmt), baseAlpha) >= target {
-                return rgba(makeBase(minAmt), baseAlpha)
-            }
-            var lo = minAmt, hi = 1.0
-            for _ in 0..<16 {
+            var lo = 0.0, hi = 1.0
+            for _ in 0..<18 {
                 let mid = (lo + hi) / 2
-                if contrastWorst(makeBase(mid), baseAlpha) >= target { hi = mid } else { lo = mid }
+                let candidate = darkDirection ? hsvToRgb(pickedHue, satScale, mid)
+                                              : hsvToRgb(pickedHue, mid, 1)
+                // darkDirection: V↑ → 밝아져 대비↓ → 만족하면 더 밝게(lo=mid)로 가장 선명한 V 탐색.
+                // lightDirection: S↑ → 진해져 대비↓ → 만족하면 더 진하게(lo=mid)로 가장 선명한 S 탐색.
+                if contrastWorst(candidate, baseAlpha) >= target { lo = mid } else { hi = mid }
             }
-            return rgba(makeBase(hi), baseAlpha)
+            // darkDirection: S 는 satScale(=70%) 고정. lightDirection: 찾은 최대 S 의 70%
+            // (채도를 줄이면 흰색 쪽이라 대비는 오히려 늘어 안전).
+            let base = darkDirection ? hsvToRgb(pickedHue, satScale, lo)
+                                     : hsvToRgb(pickedHue, lo * satScale, 1)
+            return rgba(base, baseAlpha)
         }
 
-        // 3) 반투명만으론 부족한 중간톤 → 극단색으로 두고 불투명도를 최소한 올린다.
+        // 반투명만으론 부족한 중간톤 글씨 → 극단색(검정/흰)으로 두고 불투명도만 최소한 올린다.
         var lo = baseAlpha, hi = 1.0
         for _ in 0..<16 {
             let mid = (lo + hi) / 2
