@@ -2217,6 +2217,10 @@ struct ContentView: View {
                 openSubtitleFile()
                 return nil
             }
+            if event.keyCode == 14 { // ⌘E — 현재 도트 이미지를 PNG로 내보내기
+                exportCurrentDotImage()
+                return nil
+            }
             return event
         }
 
@@ -2302,6 +2306,116 @@ struct ContentView: View {
             }
             return event
         }
+    }
+
+    // MARK: 도트 이미지 내보내기 (⌘E)
+
+    /// 현재 화면의 도트 격자를 PNG로 ~/Downloads 에 저장한다.
+    /// - 파일명: "<원본파일명> <시각> by DOPL.png" (영상), 정지 이미지는 시각 생략.
+    /// - 자막/모드 레이블/배경효과는 제외하고 순수 도트 격자만 렌더한다.
+    /// - 로드된 미디어가 없으면(dotColors 비어있음) 아무 동작도 하지 않는다(no-op).
+    private func exportCurrentDotImage() {
+        guard !sampler.dotColors.isEmpty else { return }
+        guard let pngData = renderDotGridPNGData() else { return }
+
+        let fileURL = uniqueDownloadsURL(baseName: exportFileBaseName())
+        do {
+            try pngData.write(to: fileURL)
+            showTransientAccentLabel("EXPORTED")
+        } catch {
+            showTransientAccentLabel("EXPORT FAILED")
+        }
+    }
+
+    /// dotColors(2D 색상 격자)를 투명 배경 PNG 로 렌더.
+    /// 화면 Canvas와 동일하게 바깥 테두리 링(인덱스 0 / 마지막)은 그리지 않는다.
+    private func renderDotGridPNGData() -> Data? {
+        let grid = sampler.gridSize
+        let dotD = sampler.dotDiameter
+        let rows = sampler.dotColors.count
+        let cols = sampler.dotColors.first?.count ?? 0
+        guard rows > 2, cols > 2, grid > 0, dotD > 0 else { return nil }
+
+        let scale: CGFloat = 2          // 레티나 품질로 약간 상향
+        let pxW = Int((CGFloat(cols) * grid * scale).rounded())
+        let pxH = Int((CGFloat(rows) * grid * scale).rounded())
+        guard pxW > 0, pxH > 0 else { return nil }
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil, width: pxW, height: pxH,
+            bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        let r = dotD / 2 * scale
+        for row in 1..<(rows - 1) {
+            let line = sampler.dotColors[row]
+            guard line.count == cols else { continue }
+            for col in 1..<(cols - 1) {
+                let cx = (CGFloat(col) * grid + grid / 2) * scale
+                // CGContext 는 좌하단 원점 → 위아래를 뒤집어 row 0 이 상단에 오게 한다.
+                let cy = CGFloat(pxH) - (CGFloat(row) * grid + grid / 2) * scale
+                ctx.setFillColor(line[col])
+                ctx.fillEllipse(in: CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2))
+            }
+        }
+
+        guard let cgImage = ctx.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
+    }
+
+    /// 내보내기 파일의 기본 이름(확장자 제외).
+    ///   "<원본파일명> <시각> by DOPL"  (영상/오디오 — 재생 위치 포함)
+    ///   "<원본파일명> by DOPL"         (정지 이미지 — 시각 생략)
+    private func exportFileBaseName() -> String {
+        let source = sanitizedFileName(currentSourceDisplayName())
+        var timePart = ""
+        if !sampler.isStaticContent,
+           let secs = sampler.previewPlayer?.currentTime().seconds,
+           secs.isFinite, secs >= 0 {
+            timePart = " " + fileTimeStamp(secs)
+        }
+        return "\(source)\(timePart) by DOPL"
+    }
+
+    /// 현재 소스의 표시 이름(확장자 제외). 파일/그룹/URL 모두 커버.
+    private func currentSourceDisplayName() -> String {
+        if !playlist.isEmpty, playlist.indices.contains(playlistIndex) {
+            return playlist[playlistIndex].deletingPathExtension().lastPathComponent
+        }
+        let title = (currentPlaybackInfoTitle ?? "DOPL").replacingOccurrences(of: "> ", with: "")
+        return (title as NSString).deletingPathExtension
+    }
+
+    /// 재생 위치를 파일명용 시각 문자열로. ':' 는 파일명에 못 쓰므로 '_' 사용.
+    ///   1시간 미만 → "MM_SS", 이상 → "H_MM_SS".
+    private func fileTimeStamp(_ seconds: Double) -> String {
+        let total = max(0, Int(seconds.rounded(.down)))
+        let h = total / 3600, m = (total % 3600) / 60, s = total % 60
+        return h > 0 ? String(format: "%d_%02d_%02d", h, m, s)
+                     : String(format: "%02d_%02d", m, s)
+    }
+
+    /// 파일 시스템에서 금지/위험한 문자를 '_' 로 치환하고 공백을 정리.
+    private func sanitizedFileName(_ raw: String) -> String {
+        let illegal = CharacterSet(charactersIn: "/\\:*?\"<>|").union(.controlCharacters)
+        let cleaned = raw.components(separatedBy: illegal).joined(separator: "_")
+        let trimmed = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "DOPL" : trimmed
+    }
+
+    /// ~/Downloads 안에서 충돌하지 않는 URL. 이미 있으면 " (1)", " (2)" … 로 회피.
+    private func uniqueDownloadsURL(baseName: String) -> URL {
+        let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+        var candidate = dir.appendingPathComponent("\(baseName).png")
+        var n = 1
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = dir.appendingPathComponent("\(baseName) (\(n)).png")
+            n += 1
+        }
+        return candidate
     }
 
     // MARK: 전역 트랜지언트 레이블
