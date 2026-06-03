@@ -567,6 +567,8 @@ private struct DotsOverlayView: View {
     /// 풀스크린 배경 스타일. brightTextMode 계산 시 참조. 비풀스크린 모드에서는 무시됨.
     let fullscreenBackgroundStyle: FullscreenBackgroundStyle
     let adaptiveSubtitleColor: Bool
+    /// peek 중 자막 아래에 반투명 캡슐 색면을 까는 옵션. (설정 Appearance)
+    let subtitleBackdropWhilePeeking: Bool
     let backgroundStyleLabel: String?
     let isEditingURL: Bool
     let urlBuffer: String
@@ -797,6 +799,36 @@ private struct DotsOverlayView: View {
 
         // 자막/URL 본문 렌더
         if let sr = subtitleRect, !subtitleLines.isEmpty {
+            // peek 중 자막 배경 캡슐 색면. 설정 ON + 실제 자막(캡션)일 때만.
+            // 텍스트 바로 뒤에 깔리도록 본문 렌더 직전에 그린다.
+            let isRealSubtitle = sampler.hasSubtitles && sampler.showSubtitles
+                && !sampler.currentSubtitle.isEmpty
+            if isPeeking, subtitleBackdropWhilePeeking, isRealSubtitle {
+                let fontSize = sampler.subtitleFontSize
+                let lineH = fontSize * 1.08
+                let nsFont = NSFont(name: dotsFontName(forSize: fontSize), size: fontSize)
+                    ?? NSFont.boldSystemFont(ofSize: fontSize)
+                let n = max(1, subtitleLines.count)
+                // sr 은 라인박스 기준이라 글씨 위 여백이 커서 글씨가 아래로 쏠림.
+                // 실제 잉크 범위(첫 줄 cap-top ~ 마지막 줄 baseline)에 맞춰 캡슐을 수직 중앙 정렬.
+                let inkTop    = sr.minY + (nsFont.ascender - nsFont.capHeight)
+                let inkBottom = sr.minY + CGFloat(n - 1) * lineH + nsFont.ascender
+                let inkCenterY = (inkTop + inkBottom) / 2
+                let padX = fontSize * 0.5
+                let padY = fontSize * 0.30
+                let capH = (inkBottom - inkTop) + padY * 2
+                // 한 줄 기준 캡슐 높이의 절반을 corner radius로 고정 → 줄 수가 늘어도
+                // 라운딩은 한 줄(반원)일 때와 동일하게 유지된다.
+                let oneLineH = nsFont.capHeight + padY * 2
+                let cornerR = oneLineH / 2
+                // 우측 마진만 1px 줄임(좌측 padX 유지, 폭에서 1 차감).
+                let capRect = CGRect(x: sr.minX - padX, y: inkCenterY - capH / 2,
+                                     width: sr.width + padX * 2 - 1, height: capH)
+                context.fill(
+                    Path(roundedRect: capRect, cornerRadius: cornerR),
+                    with: .color(subtitleBackdropColor(from: overlayColor))
+                )
+            }
             let lineH = sampler.subtitleFontSize * 1.08
             for (i, line) in subtitleLines.enumerated() {
                 let resolved = context.resolve(
@@ -1029,6 +1061,79 @@ private struct DotsOverlayView: View {
             )
         }
     }
+
+    /// peek 자막 배경 캡슐 색면.
+    /// - 기본은 글씨색을 40% 어둡게(×0.6)한 틴트지만, 글씨색과의 WCAG 대비비가
+    ///   부족하면 더 어둡히거나(밝은 글씨) 밝은 쪽으로 전환해(어두운 글씨) 대비를 확보한다.
+    /// - 캡슐이 반투명이라 뒤 영상이 비치므로 "영상이 글씨색으로 비치는 최악의 경우"
+    ///   (= α·배경 + (1−α)·글씨)까지 가정한다. 기본 α(0.5)로 부족한 중간톤 글씨에 한해
+    ///   필요한 최소한으로만 불투명도를 올려 대비비 ≥ 3:1(WCAG 2.0 AA 큰 텍스트)을 확보한다.
+    private func subtitleBackdropColor(from textColor: Color) -> Color {
+        let ns = NSColor(textColor).usingColorSpace(.sRGB) ?? NSColor(textColor)
+        let tr = Double(ns.redComponent), tg = Double(ns.greenComponent), tb = Double(ns.blueComponent)
+        let target = 3.0            // WCAG 2.0 AA (큰 텍스트) 3:1
+        let baseAlpha = 0.5         // 기본 반투명도
+        let chromaBoost = 4.0       // 틴트 채도 극대화 (adaptiveColor 와 동일 배수)
+
+        func lin(_ c: Double) -> Double {
+            c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        func luminance(_ c: (Double, Double, Double)) -> Double {
+            0.2126 * lin(c.0) + 0.7152 * lin(c.1) + 0.0722 * lin(c.2)
+        }
+        let lText = luminance((tr, tg, tb))
+        // base 색면을 α로 합성하되, 뒤 영상이 글씨색이라는 최악 가정으로 유효색을 만든다.
+        func contrastWorst(_ b: (Double, Double, Double), _ alpha: Double) -> Double {
+            let eff = (alpha * b.0 + (1 - alpha) * tr,
+                       alpha * b.1 + (1 - alpha) * tg,
+                       alpha * b.2 + (1 - alpha) * tb)
+            let lBg = luminance(eff)
+            let hi = Swift.max(lText, lBg), lo = Swift.min(lText, lBg)
+            return (hi + 0.05) / (lo + 0.05)
+        }
+
+        // 1) 검정·흰색 중 대비를 더 키울 수 있는 방향 선택. (불투명 기준 상한 비교)
+        let darkDirection = (lText + 0.05) / 0.05 >= 1.05 / (lText + 0.05)
+        let extreme: (Double, Double, Double) = darkDirection ? (0, 0, 0) : (1, 1, 1)
+        // 채도 강조: 휘도 축에서 각 채널을 boost 배만큼 확장해 더 선명한 틴트로.
+        // (회색/흰/검 등 무채색은 확장할 채도가 없어 그대로 — 자연스러움)
+        func clamp01(_ v: Double) -> Double { Swift.max(0, Swift.min(1, v)) }
+        let lAvg = 0.2126 * tr + 0.7152 * tg + 0.0722 * tb
+        let src = (clamp01(lAvg + (tr - lAvg) * chromaBoost),
+                   clamp01(lAvg + (tg - lAvg) * chromaBoost),
+                   clamp01(lAvg + (tb - lAvg) * chromaBoost))
+        func makeBase(_ amt: Double) -> (Double, Double, Double) {
+            darkDirection
+                ? (src.0 * (1 - amt), src.1 * (1 - amt), src.2 * (1 - amt))            // 검정 쪽
+                : (src.0 + (1 - src.0) * amt, src.1 + (1 - src.1) * amt, src.2 + (1 - src.2) * amt) // 흰색 쪽
+        }
+        let minAmt = darkDirection ? 0.4 : 0.0   // 어둡게 방향은 최소 40% 유지
+
+        // 2) α=0.7 에서 색 이동만으로 목표 대비 가능하면 그대로 (가장 반투명).
+        if contrastWorst(extreme, baseAlpha) >= target {
+            if contrastWorst(makeBase(minAmt), baseAlpha) >= target {
+                return rgba(makeBase(minAmt), baseAlpha)
+            }
+            var lo = minAmt, hi = 1.0
+            for _ in 0..<16 {
+                let mid = (lo + hi) / 2
+                if contrastWorst(makeBase(mid), baseAlpha) >= target { hi = mid } else { lo = mid }
+            }
+            return rgba(makeBase(hi), baseAlpha)
+        }
+
+        // 3) 반투명만으론 부족한 중간톤 → 극단색으로 두고 불투명도를 최소한 올린다.
+        var lo = baseAlpha, hi = 1.0
+        for _ in 0..<16 {
+            let mid = (lo + hi) / 2
+            if contrastWorst(extreme, mid) >= target { hi = mid } else { lo = mid }
+        }
+        return rgba(extreme, hi)
+    }
+
+    private func rgba(_ c: (Double, Double, Double), _ a: Double) -> Color {
+        Color(.sRGB, red: c.0, green: c.1, blue: c.2, opacity: a)
+    }
 }
 
 // MARK: - Content View
@@ -1063,6 +1168,7 @@ struct ContentView: View {
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
     @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
     @AppStorage("adaptiveSubtitleColor") private var adaptiveSubtitleColor = true
+    @AppStorage("subtitleBackdropWhilePeeking") private var subtitleBackdropWhilePeeking = false
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @AppStorage("04dopl.backgroundStyle") private var backgroundStyleRaw: Int = BackgroundStyle.blur.rawValue
     /// 풀스크린 전용 배경 모드. 일반 모드와 독립적으로 영속.
@@ -1238,6 +1344,8 @@ struct ContentView: View {
             guard FileManager.default.fileExists(atPath: url.path) else { return false }
             playlist = [url]
             playlistIndex = 0
+            // openPlaylistItem 과 동일하게 직전 파일 복원 시에도 사이드카 자막 검출.
+            subtitlePromptURL = findSiblingSubtitle(for: url)
             let key = playbackPositionKey(forFileURL: url)
             currentPlaybackPositionKey = key
             pendingAutoResize = true
@@ -1353,6 +1461,7 @@ struct ContentView: View {
                 backgroundStyle: backgroundStyle,
                 fullscreenBackgroundStyle: fullscreenBackgroundStyle,
                 adaptiveSubtitleColor: adaptiveSubtitleColor,
+                subtitleBackdropWhilePeeking: subtitleBackdropWhilePeeking,
                 backgroundStyleLabel: backgroundStyleLabel,
                 isEditingURL: isEditingURL,
                 urlBuffer: urlBuffer,

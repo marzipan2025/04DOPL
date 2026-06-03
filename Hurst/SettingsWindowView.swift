@@ -284,6 +284,7 @@ struct GeneralSettingsView: View {
     @AppStorage("rememberPlaybackPosition") private var rememberPlaybackPosition = false
     @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
     @AppStorage("adaptiveSubtitleColor") private var adaptiveSubtitleColor = true
+    @AppStorage("subtitleBackdropWhilePeeking") private var subtitleBackdropWhilePeeking = false
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
     
@@ -315,8 +316,13 @@ struct GeneralSettingsView: View {
                         }
                     }
                 }
-                SettingsRow("Adaptive Subtitle Color", showDivider: false) {
+                SettingsRow("Adaptive Subtitle Color") {
                     Toggle("", isOn: $adaptiveSubtitleColor)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                }
+                SettingsRow("Subtitle Backdrop While Peeking", showDivider: false) {
+                    Toggle("", isOn: $subtitleBackdropWhilePeeking)
                         .labelsHidden()
                         .toggleStyle(.switch)
                 }
