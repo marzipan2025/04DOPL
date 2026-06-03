@@ -5,6 +5,7 @@ extension Notification.Name {
     static let openFileRequested     = Notification.Name("openFileRequested")
     static let openURLRequested      = Notification.Name("openURLRequested")
     static let openPlaybackInfoRequested = Notification.Name("openPlaybackInfoRequested")
+    static let exportImageRequested  = Notification.Name("exportImageRequested")
     static let cycleBackgroundStyle  = Notification.Name("cycleBackgroundStyle")
     static let resizeToHalfVideoSize = Notification.Name("resizeToHalfVideoSize")
     static let zoomWindowOut         = Notification.Name("zoomWindowOut")
@@ -255,6 +256,16 @@ struct HurstApp: App {
                     NotificationCenter.default.post(name: .openPlaybackInfoRequested, object: nil)
                 }
                 .keyboardShortcut("i", modifiers: .command)
+
+                Divider()
+
+                // 현재 도트 이미지를 PNG로 ~/Downloads 에 저장. (미디어 미로드 시 no-op)
+                Button("Export Image") {
+                    NotificationCenter.default.post(name: .exportImageRequested, object: nil)
+                }
+                .keyboardShortcut("e", modifiers: .command)
+
+                Divider()
 
                 // Open Recent — 최대 10개, LRU. Clear History 로 리스트 삭제.
                 Menu("Open Recent") {

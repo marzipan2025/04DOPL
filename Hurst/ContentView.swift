@@ -179,6 +179,7 @@ private struct MenuCommandObservers: ViewModifier {
     let onExternalOpenMediaURL: (Notification) -> Void
     let onOpenURLRequested:     (Notification) -> Void
     let onOpenPlaybackInfoRequested: (Notification) -> Void
+    let onExportImage:          () -> Void
     let onCycleBackgroundStyle: () -> Void
     let onToggleAlwaysOnTop:    (Notification) -> Void
     let onPlaybackEnded:        () -> Void
@@ -191,6 +192,7 @@ private struct MenuCommandObservers: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .externalOpenMediaURL), perform: onExternalOpenMediaURL)
             .onReceive(NotificationCenter.default.publisher(for: .openURLRequested),     perform: onOpenURLRequested)
             .onReceive(NotificationCenter.default.publisher(for: .openPlaybackInfoRequested), perform: onOpenPlaybackInfoRequested)
+            .onReceive(NotificationCenter.default.publisher(for: .exportImageRequested))  { _ in onExportImage() }
             .onReceive(NotificationCenter.default.publisher(for: .cycleBackgroundStyle)) { _ in onCycleBackgroundStyle() }
             .onReceive(NotificationCenter.default.publisher(for: .toggleAlwaysOnTop),    perform: onToggleAlwaysOnTop)
             .onReceive(NotificationCenter.default.publisher(for: .playbackEnded))        { _ in onPlaybackEnded() }
@@ -1562,6 +1564,7 @@ struct ContentView: View {
             onExternalOpenMediaURL: handleExternalOpenMediaURL,
             onOpenURLRequested:     handleOpenURLRequested,
             onOpenPlaybackInfoRequested: handleOpenPlaybackInfoRequested,
+            onExportImage:          exportCurrentDotImage,
             onCycleBackgroundStyle: cycleBackgroundStyle,
             onToggleAlwaysOnTop:    handleToggleAlwaysOnTop,
             onPlaybackEnded:        advancePlaylist,
@@ -2217,10 +2220,7 @@ struct ContentView: View {
                 openSubtitleFile()
                 return nil
             }
-            if event.keyCode == 14 { // ⌘E — 현재 도트 이미지를 PNG로 내보내기
-                exportCurrentDotImage()
-                return nil
-            }
+            // ⌘E(Export Image)는 File 메뉴 항목이 단축키를 소유하므로 여기선 메뉴로 패스.
             return event
         }
 

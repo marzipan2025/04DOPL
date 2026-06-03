@@ -489,6 +489,7 @@ struct ShortcutsSettingsView: View {
         .init(input: "Cmd + U", action: "Open URL"),
         .init(input: "Cmd + I", action: "Open playback info"),
         .init(input: "Cmd + P", action: "Open subtitle file"),
+        .init(input: "Cmd + E", action: "Export dot image as PNG"),
         .init(input: "Cmd + ,", action: "Open settings")
     ]
 
