@@ -2460,8 +2460,15 @@ struct ContentView: View {
     /// - 자막/모드 레이블/배경효과는 제외하고 순수 도트 격자만 렌더한다.
     /// - 로드된 미디어가 없으면(dotColors 비어있음) 아무 동작도 하지 않는다(no-op).
     private func exportCurrentDotImage() {
-        guard !sampler.dotColors.isEmpty else { return }
-        guard let pngData = renderDotGridPNGData() else { return }
+        // peek 중에는 도트화 전 원본 프레임을 그대로 내보낸다.
+        let pngData: Data?
+        if isPeeking {
+            pngData = renderOriginalFramePNGData()
+        } else {
+            guard !sampler.dotColors.isEmpty else { return }
+            pngData = renderDotGridPNGData()
+        }
+        guard let pngData else { return }
 
         let fileURL = uniqueDownloadsURL(baseName: exportFileBaseName())
         do {
@@ -2507,6 +2514,12 @@ struct ContentView: View {
         }
 
         guard let cgImage = ctx.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
+    }
+
+    /// peek 중 표시되는 원본 영상 프레임을 PNG 로 렌더(도트화 없음).
+    private func renderOriginalFramePNGData() -> Data? {
+        guard let cgImage = sampler.currentFrameCGImage() else { return nil }
         return NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:])
     }
 

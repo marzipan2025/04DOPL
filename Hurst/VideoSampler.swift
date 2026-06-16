@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import Accelerate
+import CoreImage
 
 /// Pre-analyzed audio energy frame for audio visualization.
 struct AudioEnergyFrame {
@@ -948,6 +949,23 @@ class VideoSampler: ObservableObject {
     /// 피크 전용 AVPlayerLayer 부착용. 읽기 전용. 외부에서 play()/pause() 직접 호출 금지 —
     /// 반드시 peekStart()/peekEnd()를 통해 상태 일관성 유지.
     var previewPlayer: AVPlayer? { player }
+
+    /// 현재 원본 프레임을 CGImage로 반환(도트화 전 원본 픽셀).
+    /// 비디오는 출력에서 가장 최신 프레임을 받아오고, 실패 시 마지막 픽셀버퍼로 폴백.
+    /// 이미지 모드는 openImage에서 세팅한 lastPixelBuffer를 그대로 사용.
+    func currentFrameCGImage() -> CGImage? {
+        var buffer = lastPixelBuffer
+        if let output = videoOutput, let player {
+            let time = player.currentTime()
+            if time.isValid, !time.isIndefinite,
+               let fresh = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
+                buffer = fresh
+            }
+        }
+        guard let pixelBuffer = buffer else { return nil }
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        return CIContext().createCGImage(ciImage, from: ciImage.extent)
+    }
 
     /// 피크 시작: 강제 재생. 이전 상태(play/pause)와 무관하게 재생 시작.
     func peekStart() {
