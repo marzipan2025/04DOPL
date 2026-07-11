@@ -797,42 +797,61 @@ class VideoSampler: ObservableObject {
                 // 오디오만 들리는 버그가 있었음.
                 let videoCodec = probeCodec(path: source.path, streamType: "v", ffmpegPath: ffmpegPath)
                 let audioCodec = probeCodec(path: source.path, streamType: "a", ffmpegPath: ffmpegPath)
+                let subtitleCodec = probeCodec(path: source.path, streamType: "s", ffmpegPath: ffmpegPath)
 
                 let mp4SafeVideo: Set<String> = ["h264", "hevc", "mpeg4", "mjpeg", "prores"]
                 let mp4SafeAudio: Set<String> = ["aac", "mp3", "ac3", "alac", "eac3"]
+                // mov_text 변환은 텍스트 기반 자막만 가능. PGS/VobSub 등 비트맵 자막을
+                // mov_text로 지정하면 remux 전체가 실패해 재인코딩 fallback으로 빠지므로
+                // (BluRay 립 mkv가 통째로 못 열리던 원인) 비트맵 자막은 드롭한다.
+                let textSubtitles: Set<String> = ["subrip", "srt", "ass", "ssa", "mov_text", "text", "webvtt"]
 
                 // probe 실패(nil) 시엔 기존 동작 유지(copy 시도). 확실히 비호환일 때만 재인코딩.
                 let copyVideo = (videoCodec == nil) || mp4SafeVideo.contains(videoCodec!)
                 let copyAudio = (audioCodec == nil) || mp4SafeAudio.contains(audioCodec!)
+                let convertSubtitle = subtitleCodec.map { textSubtitles.contains($0) } ?? false
 
-                var args = ["-y", "-i", source.path]
-                args += copyVideo ? ["-c:v", "copy"] : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
-                // HEVC를 MP4로 stream copy 할 때, ffmpeg은 기본으로 hev1 태그를 쓴다.
-                // Apple AVFoundation은 hev1은 디코드 못하고 hvc1만 받아들여서
-                // "오디오만 나오고 영상은 안 보임" 현상이 발생. 태그를 hvc1로 강제.
-                if copyVideo && videoCodec == "hevc" {
-                    args += ["-tag:v", "hvc1"]
+                func baseArgs(subtitle: Bool) -> [String] {
+                    var args = ["-y", "-i", source.path]
+                    args += copyVideo ? ["-c:v", "copy"] : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
+                    // HEVC를 MP4로 stream copy 할 때, ffmpeg은 기본으로 hev1 태그를 쓴다.
+                    // Apple AVFoundation은 hev1은 디코드 못하고 hvc1만 받아들여서
+                    // "오디오만 나오고 영상은 안 보임" 현상이 발생. 태그를 hvc1로 강제.
+                    if copyVideo && videoCodec == "hevc" {
+                        args += ["-tag:v", "hvc1"]
+                    }
+                    args += copyAudio ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"]
+                    args += subtitle ? ["-c:s", "mov_text"] : ["-sn"]
+                    // 로컬 임시 파일 재생이라 +faststart(moov 앞으로 옮기는 2차 패스) 불필요.
+                    // 대용량 파일에서 remux 시간을 절반으로 줄인다.
+                    args += [tempURL.path]
+                    return args
                 }
-                args += copyAudio ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"]
-                // 자막이 있으면 MP4 호환 포맷(mov_text)으로 변환. 실패해도 아래 fallback이 처리.
-                args += ["-c:s", "mov_text", "-movflags", "+faststart", tempURL.path]
 
-                if runFFmpeg(path: ffmpegPath, args: args) {
+                if runFFmpeg(path: ffmpegPath, args: baseArgs(subtitle: convertSubtitle)) {
                     continuation.resume(returning: .success(tempURL))
                     return
                 }
 
-                // 1차 실패 시 자막 때문일 수 있으므로 자막 드롭 후 재인코딩 fallback
+                // 자막 변환이 문제였을 수 있으므로, 여전히 stream copy 유지한 채 자막만 드롭 후 재시도
+                if convertSubtitle {
+                    try? FileManager.default.removeItem(at: tempURL)
+                    if runFFmpeg(path: ffmpegPath, args: baseArgs(subtitle: false)) {
+                        continuation.resume(returning: .success(tempURL))
+                        return
+                    }
+                }
+
+                // 최후 수단: 전체 재인코딩 (느림)
                 try? FileManager.default.removeItem(at: tempURL)
                 let fallbackArgs = [
                     "-y", "-i", source.path,
                     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
                     "-c:a", "aac", "-b:a", "192k",
                     "-sn",
-                    "-movflags", "+faststart",
                     tempURL.path
                 ]
-                
+
                 if runFFmpeg(path: ffmpegPath, args: fallbackArgs) {
                     continuation.resume(returning: .success(tempURL))
                     return

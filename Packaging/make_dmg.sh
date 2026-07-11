@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────
-# make_dmg.sh  —  04dopl 1.0.7 DMG 패키져 (ffmpeg 임베드 포함)
+# make_dmg.sh  —  04dopl 1.1.4 DMG 패키져 (ffmpeg 임베드 포함)
 # ─────────────────────────────────────────────────────────
 set -e
 
 APP_NAME="04dopl"
-VOL_NAME="04dopl 1.0.7"
-VERSION="1.0.7"
+VOL_NAME="04dopl 1.1.4"
+VERSION="1.1.4"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -34,7 +34,7 @@ DYLIB_SOURCES=(
   "/opt/homebrew/opt/opus/lib/libopus.0.dylib"
   "/opt/homebrew/opt/svt-av1/lib/libSvtAv1Enc.4.dylib"
   "/opt/homebrew/opt/x264/lib/libx264.165.dylib"
-  "/opt/homebrew/opt/x265/lib/libx265.215.dylib"
+  "/opt/homebrew/opt/x265/lib/libx265.216.dylib"
 )
 
 # Homebrew 경로를 번들 내부 경로로 교체
