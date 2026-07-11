@@ -2,10 +2,13 @@ import SwiftUI
 import AppKit
 
 private let settingsWindowBackground = Color(nsColor: NSColor(calibratedWhite: 0.11, alpha: 1.0))
-private let settingsSidebarBackground = Color(nsColor: NSColor(calibratedWhite: 0.07, alpha: 1.0))
-private let settingsPanelBackground = Color(nsColor: NSColor(calibratedWhite: 0.14, alpha: 1.0))
+private let settingsSidebarBackground = Color(nsColor: NSColor(calibratedWhite: 0.095, alpha: 1.0))
 private let settingsPanelStroke = Color.white.opacity(0.08)
 private let settingsDividerColor = Color.white.opacity(0.08)
+// 배경(0.07~0.11)보다 약간 밝은 비활성 텍스트, 활성 대비용 밝은 텍스트
+private let settingsInactiveText = Color.white.opacity(0.30)
+private let settingsRowText = Color.white.opacity(0.88)
+private let settingsGroupTitleText = Color.white.opacity(0.52)
 
 private enum SettingsFont {
     static func light(_ size: CGFloat) -> Font {
@@ -29,10 +32,10 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
             AppDelegate.restoreSettingsWindowStyle(window)
             window.appearance = NSAppearance(named: .darkAqua)
             window.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0)
-            window.minSize = NSSize(width: 640, height: 444)
+            window.minSize = NSSize(width: 408, height: 400)
             window.setContentSize(NSSize(
-                width: max(window.frame.width, 640),
-                height: 444
+                width: max(window.frame.width, 408),
+                height: 400
             ))
         }
         return view
@@ -44,10 +47,10 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
             AppDelegate.restoreSettingsWindowStyle(window)
             window.appearance = NSAppearance(named: .darkAqua)
             window.backgroundColor = NSColor(calibratedWhite: 0.11, alpha: 1.0)
-            window.minSize = NSSize(width: 640, height: 444)
+            window.minSize = NSSize(width: 408, height: 400)
             window.setContentSize(NSSize(
-                width: max(window.frame.width, 640),
-                height: 444
+                width: max(window.frame.width, 408),
+                height: 400
             ))
         }
     }
@@ -55,30 +58,24 @@ private struct SettingsWindowConfigurator: NSViewRepresentable {
 
 struct SettingsWindowView: View {
     @State private var selectedTab: SettingsTab? = .general
-    
+    @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
+
+    private var accentColor: Color {
+        AppAccentColor.choice(for: accentColorRaw).color
+    }
+
     enum SettingsTab: String, CaseIterable, Identifiable {
         case general = "General"
-        case playback = "Playback"
         case shortcuts = "Shortcuts"
         case licences = "Licences"
-        
+
         var id: String { self.rawValue }
-        
+
         var icon: String {
             switch self {
             case .general:    return "gearshape.fill"
-            case .playback:   return "play.rectangle.fill"
             case .shortcuts:  return "command"
             case .licences:   return "doc.text.fill"
-            }
-        }
-        
-        var color: Color {
-            switch self {
-            case .general:    return .purple
-            case .playback:   return .blue
-            case .shortcuts:  return .mint
-            case .licences:   return .orange
             }
         }
     }
@@ -95,38 +92,26 @@ struct SettingsWindowView: View {
                 detailPane
             }
         }
-        .frame(minWidth: 640, minHeight: 444)
+        .frame(minWidth: 408, minHeight: 400)
         .background(settingsWindowBackground)
         .preferredColorScheme(.dark)
     }
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(spacing: 4) {
+            VStack(spacing: 2) {
                 ForEach(SettingsTab.allCases) { tab in
                     Button {
                         selectedTab = tab
                     } label: {
-                        HStack(spacing: 0) {
-                            Text(tab.rawValue)
-                                .font(SettingsFont.regular(14))
-                                .foregroundStyle(tab.color)
-
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 10)
-                        .padding(.trailing, 6)
-                        .padding(.vertical, 8)
-                        .background {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(
-                                    selectedTab == tab
-                                    ? Color.white.opacity(0.12)
-                                    : .clear
-                                )
-                        }
-                        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        Text(tab.rawValue)
+                            .font(SettingsFont.regular(16))
+                            .foregroundStyle(selectedTab == tab ? accentColor : settingsInactiveText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 10)
+                            .padding(.trailing, 6)
+                            .padding(.vertical, 4)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .focusable(false)
@@ -137,7 +122,7 @@ struct SettingsWindowView: View {
 
             Spacer(minLength: 0)
         }
-        .frame(width: 184)
+        .frame(width: 147)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(settingsSidebarBackground)
     }
@@ -149,7 +134,7 @@ struct SettingsWindowView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(tab.rawValue)
                         .font(SettingsFont.bold(26))
-                        .foregroundStyle(tab.color)
+                        .foregroundStyle(accentColor)
 
                     Text(tab.subtitle)
                         .font(SettingsFont.light(14))
@@ -169,8 +154,6 @@ struct SettingsWindowView: View {
                         switch tab {
                         case .general:
                             GeneralSettingsView()
-                        case .playback:
-                            PlaybackSettingsView()
                         case .shortcuts:
                             ShortcutsSettingsView()
                         case .licences:
@@ -195,8 +178,6 @@ private extension SettingsWindowView.SettingsTab {
         switch self {
         case .general:
             return "Core app behavior and launch defaults"
-        case .playback:
-            return "Behaviors and Controls"
         case .shortcuts:
             return "Key inputs and gestures"
         case .licences:
@@ -208,33 +189,25 @@ private extension SettingsWindowView.SettingsTab {
 struct SettingsSection<Content: View>: View {
     let title: String
     let content: Content
-    let backgroundColor: Color
-    
+
     init(
         _ title: String,
-        backgroundColor: Color = settingsPanelBackground,
         @ViewBuilder content: () -> Content
     ) {
         self.title = title
-        self.backgroundColor = backgroundColor
         self.content = content()
     }
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text(title)
-                .font(SettingsFont.regular(14))
-                .foregroundColor(.secondary)
-            
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title.uppercased())
+                .font(SettingsFont.bold(16))
+                .tracking(2.4)
+                .foregroundStyle(settingsGroupTitleText)
+
             VStack(spacing: 0) {
                 content
             }
-            .background(backgroundColor)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(settingsPanelStroke, lineWidth: 0.5)
-            )
         }
     }
 }
@@ -262,21 +235,47 @@ struct SettingsRow<Content: View>: View {
             HStack(alignment: .center, spacing: 14) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(label)
-                        .font(SettingsFont.regular(16))
+                        .font(SettingsFont.light(16))
+                        .foregroundStyle(settingsRowText)
                 }
                 Spacer()
                 content
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 11 + extraVerticalPadding)
-            
+            .padding(.vertical, 10 + extraVerticalPadding)
+
             if showDivider {
                 Rectangle()
                     .fill(settingsDividerColor)
                     .frame(height: 1)
-                    .padding(.horizontal, 16)
             }
         }
+    }
+}
+
+/// OS 스위치 대신 쓰는 텍스트 토글. 현재 상태 단어만 강조 (ON=accent, OFF=밝은 회색).
+struct OnOffToggle: View {
+    @Binding var isOn: Bool
+    @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+        } label: {
+            HStack(spacing: 7) {
+                Text("ON")
+                    .foregroundStyle(isOn ? AppAccentColor.choice(for: accentColorRaw).color : settingsInactiveText)
+                Text("/")
+                    .foregroundStyle(settingsInactiveText)
+                Text("OFF")
+                    .foregroundStyle(isOn ? settingsInactiveText : Color.white.opacity(0.75))
+            }
+            .font(SettingsFont.bold(16))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .accessibilityAddTraits(.isToggle)
+        .accessibilityValue(isOn ? "On" : "Off")
     }
 }
 
@@ -285,27 +284,35 @@ struct GeneralSettingsView: View {
     @AppStorage("autoResizeWindowToVideo") private var autoResizeWindowToVideo = true
     @AppStorage("adaptiveSubtitleColor") private var adaptiveSubtitleColor = true
     @AppStorage("subtitleBackdropWhilePeeking") private var subtitleBackdropWhilePeeking = false
+    @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
+    @AppStorage("tapToPeek") private var tapToPeek = false
+    @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             SettingsSection("Behavior") {
                 SettingsRow("Remember Playback Position") {
-                    Toggle("", isOn: $rememberPlaybackPosition)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
+                    OnOffToggle(isOn: $rememberPlaybackPosition)
                 }
-                SettingsRow("Auto-resize Window to Video", showDivider: false) {
-                    Toggle("", isOn: $autoResizeWindowToVideo)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
+                SettingsRow("Playback Loop") {
+                    OnOffToggle(isOn: $loopMultiFilePlayback)
+                }
+                SettingsRow("Tap to Peek") {
+                    OnOffToggle(isOn: $tapToPeek)
+                }
+                SettingsRow("Auto-resize Window to Video") {
+                    OnOffToggle(isOn: $autoResizeWindowToVideo)
+                }
+                SettingsRow("Prevent Display Sleep in Fullscreen", showDivider: false) {
+                    OnOffToggle(isOn: $preventFullscreenDisplaySleep)
                 }
             }
 
             SettingsSection("Appearance") {
                 SettingsRow("Accent Color", extraVerticalPadding: 4) {
-                    HStack(spacing: 13) {
+                    HStack(spacing: 10) {
                         ForEach(AppAccentColor.allCases) { choice in
                             AccentColorSwatch(
                                 choice: choice,
@@ -317,14 +324,10 @@ struct GeneralSettingsView: View {
                     }
                 }
                 SettingsRow("Adaptive Subtitle Color") {
-                    Toggle("", isOn: $adaptiveSubtitleColor)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
+                    OnOffToggle(isOn: $adaptiveSubtitleColor)
                 }
                 SettingsRow("Subtitle Backdrop While Peeking", showDivider: false) {
-                    Toggle("", isOn: $subtitleBackdropWhilePeeking)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
+                    OnOffToggle(isOn: $subtitleBackdropWhilePeeking)
                 }
             }
 
@@ -406,50 +409,20 @@ private struct AccentColorSwatch: View {
                 if isSelected {
                     Circle()
                         .stroke(Color.white, lineWidth: 0.5)
-                        .padding(4)
+                        .padding(3)
                 }
             }
-            .frame(width: 28, height: 28)
+            .frame(width: 22, height: 22)
             .overlay(
                 Circle()
                     .stroke(Color.primary.opacity(0.14), lineWidth: 0.5)
             )
         }
         .buttonStyle(.plain)
+        .focusable(false)
         .help(choice.label)
         .accessibilityLabel(choice.label)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-    }
-}
-
-struct PlaybackSettingsView: View {
-    @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
-    @AppStorage("tapToPeek") private var tapToPeek = false
-    @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            SettingsSection("Playback") {
-                SettingsRow("Playback Loop") {
-                    Toggle("", isOn: $loopMultiFilePlayback)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-                SettingsRow("Tap to Peek", showDivider: false) {
-                    Toggle("", isOn: $tapToPeek)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-            }
-
-            SettingsSection("Fullscreen") {
-                SettingsRow("Prevent Display Sleep", showDivider: false) {
-                    Toggle("", isOn: $preventFullscreenDisplaySleep)
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                }
-            }
-        }
     }
 }
 
@@ -467,7 +440,8 @@ private struct ShortcutRow: View {
         VStack(spacing: 0) {
             HStack(alignment: .center, spacing: 16) {
                 Text(item.action)
-                    .font(SettingsFont.regular(16))
+                    .font(SettingsFont.light(16))
+                    .foregroundStyle(settingsRowText)
 
                 Spacer()
 
@@ -476,14 +450,12 @@ private struct ShortcutRow: View {
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.trailing)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
 
             if showDivider {
                 Rectangle()
                     .fill(settingsDividerColor)
                     .frame(height: 1)
-                    .padding(.horizontal, 16)
             }
         }
     }
