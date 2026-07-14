@@ -289,6 +289,9 @@ struct GeneralSettingsView: View {
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
     @AppStorage(AppAccentColor.storageKey) private var accentColorRaw = AppAccentColor.defaultChoice.rawValue
     @State private var isResetConfirmationVisible = false
+    @StateObject private var updater = UpdateChecker()
+
+    private var accentColor: Color { AppAccentColor.choice(for: accentColorRaw).color }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
@@ -331,6 +334,8 @@ struct GeneralSettingsView: View {
                 }
             }
 
+            softwareUpdateSection
+
             VStack(alignment: .leading, spacing: 18) {
                 Text("This will permanently clear preferences, history, cache, and remembered app state. It cannot be undone.")
                     .font(SettingsFont.regular(14))
@@ -365,6 +370,85 @@ struct GeneralSettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    // Inline update UI shown above the Reset block (this app has no toast
+    // layer). One button whose title/action follow the checker's phase:
+    // Check → Download & Install → Install & Relaunch, plus a status line.
+    @ViewBuilder
+    private var softwareUpdateSection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(updateStatusText)
+                .font(SettingsFont.regular(14))
+                .foregroundStyle(updateStatusColor)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                updatePrimaryAction()
+            } label: {
+                SettingsFooterButtonLabel(
+                    title: updateButtonTitle,
+                    foregroundColor: updateButtonIsCTA ? .white : .primary,
+                    backgroundColor: updateButtonIsCTA ? accentColor : Color.white.opacity(0.08),
+                    strokeColor: updateButtonIsCTA ? nil : settingsPanelStroke
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(updater.isBusy)
+            .opacity(updater.isBusy ? 0.6 : 1)
+        }
+    }
+
+    private var updateStatusText: String {
+        switch updater.postUpdateNote {
+        case .success(let v)?: return "Updated to v \(v). You're on the latest version."
+        case .failure?:        return "The last update didn't finish. Try checking again."
+        case nil:              break
+        }
+        switch updater.phase {
+        case .idle:                            return "You're on v \(updater.currentVersion)."
+        case .checking:                        return "Checking for updates…"
+        case .upToDate:                        return "You're up to date (v \(updater.currentVersion))."
+        case .available(let v, _):             return "Version \(v) is available. You're on v \(updater.currentVersion)."
+        case .downloading(let v):              return "Downloading v \(v)…"
+        case .readyToInstall(let v, _, _, _):  return "Version \(v) is ready. 04dopl will quit and reopen to finish."
+        case .failed(let message):             return message
+        }
+    }
+
+    private var updateStatusColor: Color {
+        if case .success? = updater.postUpdateNote { return accentColor }
+        switch updater.phase {
+        case .available, .readyToInstall: return accentColor
+        case .failed:                     return Color(red: 0.9, green: 0.36, blue: 0.36)
+        default:                          return .secondary
+        }
+    }
+
+    private var updateButtonTitle: String {
+        switch updater.phase {
+        case .checking:       return "Checking…"
+        case .available:      return "Download & Install"
+        case .downloading:    return "Downloading…"
+        case .readyToInstall: return "Install & Relaunch"
+        default:              return "Check for Update"
+        }
+    }
+
+    private var updateButtonIsCTA: Bool {
+        switch updater.phase {
+        case .available, .readyToInstall: return true
+        default:                          return false
+        }
+    }
+
+    private func updatePrimaryAction() {
+        switch updater.phase {
+        case .available:              updater.download()
+        case .readyToInstall:         updater.install()
+        case .checking, .downloading: break
+        default:                      updater.check()
         }
     }
 }
@@ -599,4 +683,234 @@ struct LicencesSettingsView: View {
 
     If you believe any required notice or license information is missing, need support, or would like to discuss professional collaboration related to this app, please contact us through the project repository on GitHub:
     """
+}
+
+// MARK: - Software update
+
+// Self-contained updater against the public GitHub releases feed. A newer
+// release is installed in one click: the dmg is downloaded to a temp dir and
+// mounted silently (no Finder window), an "Install & Relaunch" step then lets a
+// detached helper replace the running bundle in place, unmount, and relaunch —
+// after which the fresh instance confirms via postUpdateNote. A process can't
+// atomically replace and relaunch itself, so the copy/relaunch lives in the
+// helper (the approach Sparkle's relauncher takes). State is published so the
+// Settings view can render it inline (this app has no toast layer).
+@MainActor
+final class UpdateChecker: ObservableObject {
+
+    enum Phase: Equatable {
+        case idle
+        case checking
+        case upToDate
+        case available(version: String, dmgURL: URL)
+        case downloading(version: String)
+        case readyToInstall(version: String, appSource: String, mountPoint: String, dmgPath: String)
+        case failed(String)
+    }
+
+    enum PostUpdateNote: Equatable { case success(String), failure }
+
+    @Published private(set) var phase: Phase = .idle
+    // Set once at init if the installer helper relaunched us.
+    @Published private(set) var postUpdateNote: PostUpdateNote?
+
+    let currentVersion: String =
+        (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
+
+    private static let appBundleName = "04dopl.app"
+    static let releasesPageURL = URL(string: "https://github.com/marzipan2025/04DOPL/releases")!
+    private static let latestAPIURL =
+        URL(string: "https://api.github.com/repos/marzipan2025/04DOPL/releases/latest")!
+
+    private enum UpdateError: Error { case mountFailed }
+
+    init() {
+        // Transient argument-domain flags set by the installer's `open --args`.
+        let defaults = UserDefaults.standard
+        if let version = defaults.string(forKey: "updateInstalledVersion") {
+            postUpdateNote = .success(version)
+        } else if defaults.bool(forKey: "updateInstallFailed") {
+            postUpdateNote = .failure
+        }
+    }
+
+    var isBusy: Bool {
+        switch phase {
+        case .checking, .downloading: return true
+        default: return false
+        }
+    }
+
+    func openReleasesPage() { NSWorkspace.shared.open(Self.releasesPageURL) }
+
+    // MARK: Check
+
+    func check() {
+        guard !isBusy else { return }
+        postUpdateNote = nil
+        phase = .checking
+        Task {
+            guard let release = await Self.fetchLatestRelease() else {
+                phase = .failed("Couldn't reach GitHub. Check your connection and try again.")
+                return
+            }
+            let latest = release.tag.hasPrefix("v") ? String(release.tag.dropFirst()) : release.tag
+            if Self.isNewer(latest, than: currentVersion), let dmgURL = release.dmgURL {
+                phase = .available(version: latest, dmgURL: dmgURL)
+            } else {
+                phase = .upToDate
+            }
+        }
+    }
+
+    // MARK: Download + silent mount
+
+    func download() {
+        guard case let .available(version, dmgURL) = phase else { return }
+        phase = .downloading(version: version)
+        Task {
+            do {
+                let (tmp, response) = try await URLSession.shared.download(from: dmgURL)
+                if let http = response as? HTTPURLResponse,
+                   !(200..<300).contains(http.statusCode) {
+                    throw URLError(.badServerResponse)
+                }
+                let dmgDest = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("04dopl-\(version).dmg")
+                try? FileManager.default.removeItem(at: dmgDest)
+                try FileManager.default.moveItem(at: tmp, to: dmgDest)
+
+                guard let mountPoint = await Self.attachDMG(at: dmgDest.path) else {
+                    throw UpdateError.mountFailed
+                }
+                let appSource = (mountPoint as NSString).appendingPathComponent(Self.appBundleName)
+                guard FileManager.default.fileExists(atPath: appSource) else {
+                    _ = await Self.runProcessData("/usr/bin/hdiutil", ["detach", mountPoint, "-quiet"])
+                    throw UpdateError.mountFailed
+                }
+                phase = .readyToInstall(version: version, appSource: appSource,
+                                        mountPoint: mountPoint, dmgPath: dmgDest.path)
+            } catch {
+                phase = .failed("The update couldn't be downloaded from GitHub.")
+            }
+        }
+    }
+
+    // MARK: Install (detached helper → quit → replace → relaunch)
+
+    func install() {
+        guard case let .readyToInstall(version, appSource, mountPoint, dmgPath) = phase else { return }
+        let dest = Bundle.main.bundlePath
+        let pid = String(ProcessInfo.processInfo.processIdentifier)
+        let script = """
+        #!/bin/bash
+        APP_PID="$1"; SRC="$2"; DEST="$3"; MOUNT="$4"; DMG="$5"; VERSION="$6"
+        for i in $(seq 1 150); do kill -0 "$APP_PID" 2>/dev/null || break; sleep 0.1; done
+        OK=0
+        STAGE="${DEST}.update-$$"; BACKUP="${DEST}.old-$$"
+        rm -rf "$STAGE" "$BACKUP"
+        if ditto "$SRC" "$STAGE"; then
+          xattr -dr com.apple.quarantine "$STAGE" 2>/dev/null
+          if mv "$DEST" "$BACKUP" 2>/dev/null; then
+            if mv "$STAGE" "$DEST" 2>/dev/null; then
+              OK=1; rm -rf "$BACKUP"
+            else
+              mv "$BACKUP" "$DEST" 2>/dev/null
+            fi
+          fi
+        fi
+        rm -rf "$STAGE" 2>/dev/null
+        hdiutil detach "$MOUNT" -quiet 2>/dev/null
+        rm -f "$DMG" 2>/dev/null
+        if [ "$OK" = "1" ]; then
+          open -a "$DEST" --args -updateInstalledVersion "$VERSION"
+        else
+          open -a "$DEST" --args -updateInstallFailed 1
+        fi
+        """
+        let scriptURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("04dopl-install.sh")
+        do {
+            try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        } catch {
+            phase = .failed("Couldn't stage the installer. Try again.")
+            return
+        }
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/bash")
+        task.arguments = [scriptURL.path, pid, appSource, dest, mountPoint, dmgPath, version]
+        do { try task.run() } catch {
+            phase = .failed("Couldn't launch the installer. Try again.")
+            return
+        }
+        NSApp.terminate(nil)
+    }
+
+    // MARK: GitHub + process helpers
+
+    private struct LatestRelease { let tag: String; let dmgURL: URL? }
+
+    private static func fetchLatestRelease() async -> LatestRelease? {
+        var request = URLRequest(url: latestAPIURL)
+        request.timeoutInterval = 10
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tag = object["tag_name"] as? String
+        else { return nil }
+        let assets = object["assets"] as? [[String: Any]] ?? []
+        let dmg = assets.first { ($0["name"] as? String)?.hasSuffix(".dmg") == true }
+        let dmgURL = (dmg?["browser_download_url"] as? String).flatMap(URL.init(string:))
+        return LatestRelease(tag: tag, dmgURL: dmgURL)
+    }
+
+    // Mounts a dmg with no Finder window; returns its mount point parsed from
+    // hdiutil's plist output (robust against the tab-delimited default format).
+    private static func attachDMG(at path: String) async -> String? {
+        let data = await runProcessData(
+            "/usr/bin/hdiutil",
+            ["attach", path, "-nobrowse", "-noverify", "-plist"]
+        )
+        guard let plist = try? PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil) as? [String: Any],
+              let entities = plist["system-entities"] as? [[String: Any]] else { return nil }
+        return entities.compactMap { $0["mount-point"] as? String }.first
+    }
+
+    private static func runProcessData(_ launchPath: String, _ args: [String]) async -> Data {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: launchPath)
+                process.arguments = args
+                let outPipe = Pipe()
+                process.standardOutput = outPipe
+                process.standardError = Pipe()
+                do { try process.run() } catch {
+                    continuation.resume(returning: Data()); return
+                }
+                let out = outPipe.fileHandleForReading.readDataToEndOfFile()
+                process.waitUntilExit()
+                continuation.resume(returning: out)
+            }
+        }
+    }
+
+    // Numeric component-wise compare ("1.1.10" > "1.1.9"); non-numeric suffixes
+    // on a component (e.g. "8_t2") are treated as their leading number.
+    static func isNewer(_ candidate: String, than current: String) -> Bool {
+        func parts(_ s: String) -> [Int] {
+            s.split(separator: ".").map { comp in
+                Int(comp.prefix { $0.isNumber }) ?? 0
+            }
+        }
+        let a = parts(candidate), b = parts(current)
+        for i in 0..<max(a.count, b.count) {
+            let x = i < a.count ? a[i] : 0
+            let y = i < b.count ? b[i] : 0
+            if x != y { return x > y }
+        }
+        return false
+    }
 }
