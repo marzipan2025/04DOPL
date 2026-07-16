@@ -495,6 +495,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.standardWindowButton(.closeButton)?.isHidden = false
         window.standardWindowButton(.miniaturizeButton)?.isHidden = false
         window.standardWindowButton(.zoomButton)?.isHidden = false
+        observeSettingsWindowResizeIfNeeded(window)
         repositionSettingsWindowButtons(window)
         DispatchQueue.main.async {
             repositionSettingsWindowButtons(window)
@@ -511,6 +512,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 themeFrame.layer?.cornerRadius = 0
                 themeFrame.layer?.masksToBounds = false
             }
+        }
+    }
+
+    // 타이틀바가 다시 레이아웃될 때(리사이즈 등) 시스템이 신호등 버튼을 기본 위치로 되돌리므로,
+    // 창 크기가 바뀔 때마다 우리 위치를 다시 적용한다. 설정 창은 SwiftUI가 delegate를 쥐고 있어
+    // delegate 대신 알림으로 관찰한다.
+    private static weak var observedSettingsWindow: NSWindow?
+    private static var settingsWindowResizeObserver: NSObjectProtocol?
+
+    private static func observeSettingsWindowResizeIfNeeded(_ window: NSWindow) {
+        guard observedSettingsWindow !== window else { return }
+        if let observer = settingsWindowResizeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observedSettingsWindow = window
+        settingsWindowResizeObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResizeNotification,
+            object: window,
+            queue: .main
+        ) { notification in
+            guard let window = notification.object as? NSWindow else { return }
+            repositionSettingsWindowButtons(window)
         }
     }
 
