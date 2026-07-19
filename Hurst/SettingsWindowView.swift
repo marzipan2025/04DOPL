@@ -848,6 +848,14 @@ final class UpdateChecker: ObservableObject {
 
     // MARK: GitHub + process helpers
 
+    /// 런칭 시 가벼운 조회용: 현재 번들보다 새 버전이 있으면 그 버전 문자열, 없으면 nil.
+    static func availableUpdateVersion() async -> String? {
+        guard let release = await fetchLatestRelease() else { return nil }
+        let latest = release.tag.hasPrefix("v") ? String(release.tag.dropFirst()) : release.tag
+        let current = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0"
+        return isNewer(latest, than: current) ? latest : nil
+    }
+
     private struct LatestRelease { let tag: String; let dmgURL: URL? }
 
     private static func fetchLatestRelease() async -> LatestRelease? {

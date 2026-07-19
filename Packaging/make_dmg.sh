@@ -5,8 +5,8 @@
 set -e
 
 APP_NAME="04dopl"
-VOL_NAME="04dopl 1.1.7"
-VERSION="1.1.7"
+VOL_NAME="04dopl 1.1.8"
+VERSION="1.1.8"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"

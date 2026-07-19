@@ -580,6 +580,8 @@ private struct DotsOverlayView: View {
     /// 피크 중엔 도트를 전부 스킵(실제 영상이 뒤에서 보이도록). 자막/레이블은 그대로 렌더.
     let isPeeking: Bool
     let accentColor: Color
+    /// 새 릴리스가 있으면 그 버전 문자열. 대기 화면 "04Dopl"이 업데이트 표기로 바뀐다.
+    let updateAvailableVersion: String?
 
     var body: some View {
         Canvas { context, size in
@@ -655,7 +657,11 @@ private struct DotsOverlayView: View {
             overlayIsSubtitle = false
             preserveLineBreaks = false
         } else if isPlaceholder {
-            overlayRawText = "04Dopl"
+            if let newVersion = updateAvailableVersion {
+                overlayRawText = "04Dopl UPDATE v\(newVersion)"
+            } else {
+                overlayRawText = "04Dopl"
+            }
             overlayIsSubtitle = false
             preserveLineBreaks = false
         } else if sampler.hasSubtitles && sampler.showSubtitles && !sampler.currentSubtitle.isEmpty {
@@ -1198,6 +1204,10 @@ struct ContentView: View {
     /// 파일 다이얼로그로 연 파일 목록 (이름순 정렬). URL/드래그드롭은 단일 항목으로 세팅.
     @State private var playlist: [URL] = []
     @State private var playlistIndex: Int = 0
+
+    // 런칭 시 GitHub 최신 릴리스 조회 결과. 새 버전이 있으면 대기 화면
+    // 플레이스홀더("04Dopl")가 업데이트 표기로 바뀐다.
+    @State private var updateAvailableVersion: String? = nil
     @AppStorage("loopMultiFilePlayback") private var loopMultiFilePlayback = false
     @AppStorage("tapToPeek") private var tapToPeek = false
     @AppStorage("preventFullscreenDisplaySleep") private var preventFullscreenDisplaySleep = false
@@ -1505,7 +1515,8 @@ struct ContentView: View {
                 playbackInfoTitle: currentPlaybackInfoTitle,
                 playbackInfoActive: isShowingPlaybackInfo,
                 isPeeking: isPeeking,
-                accentColor: accentColor
+                accentColor: accentColor,
+                updateAvailableVersion: updateAvailableVersion
             )
 
             // URL 편집 모드: "CANCEL"/"X  GO" 클릭 히트박스 (투명).
@@ -1628,6 +1639,7 @@ struct ContentView: View {
         interactiveCanvas
         .onAppear {
             installKeyMonitor()
+            Task { updateAvailableVersion = await UpdateChecker.availableUpdateVersion() }
             DispatchQueue.main.async {
                 if let hostWindow {
                     AppDelegate.applyStyle(hostWindow)
