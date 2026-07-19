@@ -18,6 +18,10 @@ extension Notification.Name {
     /// 최근 항목 메뉴 클릭. userInfo["kind"], ["value"], ["paths"], ["title"] 를 사용.
     static let openRecentRequested   = Notification.Name("openRecentRequested")
     static let resetAppStateRequested = Notification.Name("resetAppStateRequested")
+    /// 대기 화면 "Update →" 클릭 → 설정 창 Software Update 섹션 노출.
+    static let revealSoftwareUpdate  = Notification.Name("revealSoftwareUpdate")
+    /// 설정 창이 스크롤을 마친 뒤 업데이트 확인(check)을 트리거.
+    static let performSoftwareUpdateCheck = Notification.Name("performSoftwareUpdateCheck")
 }
 
 struct ExternalMediaOpenRequest {

@@ -9,6 +9,8 @@ private let settingsDividerColor = Color.white.opacity(0.08)
 private let settingsInactiveText = Color.white.opacity(0.30)
 private let settingsRowText = Color.white.opacity(0.88)
 private let settingsGroupTitleText = Color.white.opacity(0.52)
+/// General 탭 Software Update 섹션의 스크롤 앵커 ID.
+private let softwareUpdateScrollID = "software-update-section"
 
 private enum SettingsFont {
     static func light(_ size: CGFloat) -> Font {
@@ -149,21 +151,35 @@ struct SettingsWindowView: View {
                     .padding(.top, 24)
                     .padding(.horizontal, 28)
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
-                        switch tab {
-                        case .general:
-                            GeneralSettingsView()
-                        case .shortcuts:
-                            ShortcutsSettingsView()
-                        case .licences:
-                            LicencesSettingsView()
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 22) {
+                            switch tab {
+                            case .general:
+                                GeneralSettingsView()
+                            case .shortcuts:
+                                ShortcutsSettingsView()
+                            case .licences:
+                                LicencesSettingsView()
+                            }
+                        }
+                        .padding(.top, 20)
+                        .padding(.horizontal, 28)
+                        .padding(.bottom, 28)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .revealSoftwareUpdate)) { _ in
+                        // 대기 화면 "Update →" 클릭: General 탭으로 전환 후
+                        // Software Update 섹션까지 스크롤하고, 업데이트 확인을 트리거.
+                        selectedTab = .general
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            withAnimation(.easeInOut(duration: 0.35)) {
+                                proxy.scrollTo(softwareUpdateScrollID, anchor: .center)
+                            }
+                            NotificationCenter.default.post(
+                                name: .performSoftwareUpdateCheck, object: nil)
                         }
                     }
-                    .padding(.top, 20)
-                    .padding(.horizontal, 28)
-                    .padding(.bottom, 28)
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .background(settingsWindowBackground)
@@ -335,6 +351,7 @@ struct GeneralSettingsView: View {
             }
 
             softwareUpdateSection
+                .id(softwareUpdateScrollID)
 
             VStack(alignment: .leading, spacing: 18) {
                 Text("This will permanently clear preferences, history, cache, and remembered app state. It cannot be undone.")
@@ -370,6 +387,10 @@ struct GeneralSettingsView: View {
                     }
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .performSoftwareUpdateCheck)) { _ in
+            // 스크롤 완료 후 자동으로 업데이트 확인. 이후 설치는 사용자 클릭으로만 진행.
+            if !updater.isBusy { updater.check() }
         }
     }
 

@@ -259,6 +259,15 @@ private func dotsFontName(forSize size: CGFloat) -> String {
     return "BPdotsUnicase-Bold"
 }
 
+/// 대기 화면 업데이트 안내 레이블. 화살표(→)는 BPdots에 글리프가 없어 벡터로 그린다.
+private let updatePlaceholderLabel = "Update"
+
+/// "Update" 텍스트 rect 뒤에 이어 그리는 화살표 프레임. 렌더와 히트박스가 공유한다.
+private func updateArrowFrame(afterTextRect sr: CGRect, fontSize: CGFloat) -> CGRect {
+    CGRect(x: sr.maxX + fontSize * 0.45, y: sr.minY,
+           width: fontSize * 1.05, height: sr.height)
+}
+
 // MARK: - Background style
 
 /// ⌘B로 4단 순환. 디폴트는 .blur (ultraThinMaterial).
@@ -556,6 +565,38 @@ private func computeURLInputGeometry(
     }
 }
 
+/// 대기 화면 "Update →" 화살표의 클릭 히트박스 rect. nil 이면 앵커를 찾지 못한 것.
+/// 렌더 쪽(draw)과 동일하게 bottom-left 앵커 + "Update" 폭 기준으로 계산한다.
+@MainActor
+private func computeUpdateArrowGeometry(
+    size: CGSize,
+    sampler: VideoSampler,
+    isFullscreen: Bool
+) -> CGRect? {
+    let grid = sampler.gridSize
+    let fontSize = sampler.subtitleFontSize
+    let lineH = fontSize * 1.08
+    // 대기 화면에서만 쓰이므로 dotColors 없이 size/grid 기준 레이아웃.
+    let layout = makeDotGridLayout(
+        size: size, grid: grid, dotDiameter: sampler.dotDiameter,
+        rowsOverride: nil, colsOverride: nil,
+        isFullscreen: isFullscreen
+    )
+    guard let a = layout.findBottomLeftAnchor() else { return nil }
+    let anchorC = layout.center(row: a.row, col: a.col)
+    let anchorLeft   = anchorC.x - layout.half
+    let anchorBottom = anchorC.y + layout.half
+    let nsFont = NSFont(name: dotsFontName(forSize: fontSize), size: fontSize)
+        ?? NSFont.boldSystemFont(ofSize: fontSize)
+    let textWidth = (updatePlaceholderLabel as NSString)
+        .size(withAttributes: [.font: nsFont]).width
+    let textRect = CGRect(x: anchorLeft, y: anchorBottom - lineH,
+                          width: textWidth, height: lineH)
+    // 화살표는 작은 타겟이라 히트박스는 주변까지 여유 있게 잡는다.
+    return updateArrowFrame(afterTextRect: textRect, fontSize: fontSize)
+        .insetBy(dx: -fontSize * 0.35, dy: -fontSize * 0.2)
+}
+
 // MARK: - Dots Overlay (the big Canvas)
 
 /// 도트 격자 + 자막/URL/모드 레이블/플레이스홀더를 모두 그리는 메인 Canvas.
@@ -657,11 +698,7 @@ private struct DotsOverlayView: View {
             overlayIsSubtitle = false
             preserveLineBreaks = false
         } else if isPlaceholder {
-            if let newVersion = updateAvailableVersion {
-                overlayRawText = "04Dopl UPDATE v\(newVersion)"
-            } else {
-                overlayRawText = "04Dopl"
-            }
+            overlayRawText = updateAvailableVersion == nil ? "04Dopl" : updatePlaceholderLabel
             overlayIsSubtitle = false
             preserveLineBreaks = false
         } else if sampler.hasSubtitles && sampler.showSubtitles && !sampler.currentSubtitle.isEmpty {
@@ -695,9 +732,11 @@ private struct DotsOverlayView: View {
             = resolveTextLayout(layout: layout, overlayRawText: overlayRawText, rightText: rightText,
                                 preserveLineBreaks: preserveLineBreaks)
 
-        // 도트 숨김용 확장 rect
+        // 도트 숨김용 확장 rect (업데이트 화살표가 있으면 그 폭까지 포함)
+        let showsUpdateArrow = isPlaceholder && updateAvailableVersion != nil
         let subtitleHideRect: CGRect? = subtitleRect.map {
-            CGRect(x: $0.minX, y: $0.minY, width: $0.width + grid, height: $0.height)
+            let arrowPad: CGFloat = showsUpdateArrow ? sampler.subtitleFontSize * 1.6 : 0
+            return CGRect(x: $0.minX, y: $0.minY, width: $0.width + grid + arrowPad, height: $0.height)
         }
         let rightBlockHideRect: CGRect? = rightBlockRect.map {
             CGRect(x: $0.minX - grid, y: $0.minY, width: $0.width + grid, height: $0.height)
@@ -851,6 +890,27 @@ private struct DotsOverlayView: View {
                              at: CGPoint(x: sr.minX, y: sr.minY + CGFloat(i) * lineH),
                              anchor: .topLeading)
             }
+        }
+
+        // 대기 화면 "Update →" 화살표 — 텍스트 뒤에 악센트 컬러 벡터로 그린다.
+        if showsUpdateArrow, let sr = subtitleRect {
+            let fontSize = sampler.subtitleFontSize
+            let nsFont = NSFont(name: dotsFontName(forSize: fontSize), size: fontSize)
+                ?? NSFont.boldSystemFont(ofSize: fontSize)
+            let arrow = updateArrowFrame(afterTextRect: sr, fontSize: fontSize)
+            // 대문자(cap) 세로 중앙에 맞춘다.
+            let midY = sr.minY + nsFont.ascender - nsFont.capHeight / 2
+            let head = fontSize * 0.26
+            var path = Path()
+            path.move(to: CGPoint(x: arrow.minX, y: midY))
+            path.addLine(to: CGPoint(x: arrow.maxX, y: midY))
+            path.move(to: CGPoint(x: arrow.maxX - head, y: midY - head))
+            path.addLine(to: CGPoint(x: arrow.maxX, y: midY))
+            path.addLine(to: CGPoint(x: arrow.maxX - head, y: midY + head))
+            context.stroke(
+                path, with: .color(accentColor),
+                style: StrokeStyle(lineWidth: max(2, fontSize * 0.09),
+                                   lineCap: .round, lineJoin: .round))
         }
 
         // "CANCEL" 또는 "X  GO" — 모두 같은 적응형 색으로 렌더 (단일 Text).
@@ -1185,6 +1245,7 @@ struct ContentView: View {
 
     @StateObject private var sampler = VideoSampler()
     @EnvironmentObject private var recents: RecentsStore
+    @Environment(\.openWindow) private var openWindow
     @State private var hostWindow: NSWindow?
     @State private var keyMonitor: Any?
     @State private var cursorHider = CursorAutoHider()
@@ -1536,6 +1597,13 @@ struct ContentView: View {
                 }
             }
 
+            // 대기 화면 "Update →" 화살표 클릭 히트박스.
+            if isStandby, updateAvailableVersion != nil {
+                GeometryReader { geo in
+                    updateArrowHitArea(size: geo.size)
+                }
+            }
+
             // 피크 히트박스: 우상단 visible 도트 1개 영역. 누르고 있는 동안 영상 노출.
             if canPeek {
                 GeometryReader { geo in
@@ -1742,6 +1810,29 @@ struct ContentView: View {
     }
 
     // MARK: URL 편집 오버레이 / 커밋·취소
+
+    /// 대기 화면 업데이트 화살표 히트박스. 클릭하면 설정 창 Software Update 섹션을 연다.
+    @ViewBuilder
+    private func updateArrowHitArea(size: CGSize) -> some View {
+        if let rect = computeUpdateArrowGeometry(
+            size: size, sampler: sampler, isFullscreen: isFullscreen
+        ) {
+            Color.clear
+                .contentShape(Rectangle())
+                .frame(width: rect.width, height: rect.height)
+                .onTapGesture { revealSoftwareUpdateSettings() }
+                .position(x: rect.midX, y: rect.midY)
+        }
+    }
+
+    /// 설정 창을 열고 Software Update 섹션으로 스크롤 + 업데이트 확인까지 트리거.
+    private func revealSoftwareUpdateSettings() {
+        openWindow(id: "settings-window")
+        // 창이 새로 열리는 경우 뷰가 마운트될 시간을 준 뒤 알림 전송.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            NotificationCenter.default.post(name: .revealSoftwareUpdate, object: nil)
+        }
+    }
 
     @ViewBuilder
     private func urlButtonOverlay(size: CGSize) -> some View {
