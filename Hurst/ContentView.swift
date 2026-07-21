@@ -259,13 +259,19 @@ private func dotsFontName(forSize size: CGFloat) -> String {
     return "BPdotsUnicase-Bold"
 }
 
-/// 대기 화면 업데이트 안내 레이블. 화살표(→)는 BPdots에 글리프가 없어 벡터로 그린다.
+/// 대기 화면 업데이트 안내 레이블. 화살표는 BPdots에 있는 "»" 글리프를 악센트 색으로 렌더.
+/// (BPdots에 "→" 글리프는 없음.)
 private let updatePlaceholderLabel = "Update"
+private let updateArrowGlyph = "»"
 
-/// "Update" 텍스트 rect 뒤에 이어 그리는 화살표 프레임. 렌더와 히트박스가 공유한다.
+/// "Update" 텍스트 rect 뒤에 이어 그리는 "»" 프레임. 렌더와 히트박스가 공유한다.
+@MainActor
 private func updateArrowFrame(afterTextRect sr: CGRect, fontSize: CGFloat) -> CGRect {
-    CGRect(x: sr.maxX + fontSize * 0.45, y: sr.minY,
-           width: fontSize * 1.05, height: sr.height)
+    let nsFont = NSFont(name: dotsFontName(forSize: fontSize), size: fontSize)
+        ?? NSFont.boldSystemFont(ofSize: fontSize)
+    let w = (updateArrowGlyph as NSString).size(withAttributes: [.font: nsFont]).width
+    return CGRect(x: sr.maxX + fontSize * 0.45, y: sr.minY,
+                  width: w, height: sr.height)
 }
 
 // MARK: - Background style
@@ -732,10 +738,12 @@ private struct DotsOverlayView: View {
             = resolveTextLayout(layout: layout, overlayRawText: overlayRawText, rightText: rightText,
                                 preserveLineBreaks: preserveLineBreaks)
 
-        // 도트 숨김용 확장 rect (업데이트 화살표가 있으면 그 폭까지 포함)
+        // 도트 숨김용 확장 rect (업데이트 "»"가 있으면 그 폭까지 포함)
         let showsUpdateArrow = isPlaceholder && updateAvailableVersion != nil
         let subtitleHideRect: CGRect? = subtitleRect.map {
-            let arrowPad: CGFloat = showsUpdateArrow ? sampler.subtitleFontSize * 1.6 : 0
+            let arrowPad: CGFloat = showsUpdateArrow
+                ? updateArrowFrame(afterTextRect: $0, fontSize: sampler.subtitleFontSize).maxX - $0.maxX
+                : 0
             return CGRect(x: $0.minX, y: $0.minY, width: $0.width + grid + arrowPad, height: $0.height)
         }
         let rightBlockHideRect: CGRect? = rightBlockRect.map {
@@ -892,25 +900,16 @@ private struct DotsOverlayView: View {
             }
         }
 
-        // 대기 화면 "Update →" 화살표 — 텍스트 뒤에 악센트 컬러 벡터로 그린다.
+        // 대기 화면 "Update »" — 텍스트 뒤에 "»" 글리프를 악센트 컬러로 그린다.
         if showsUpdateArrow, let sr = subtitleRect {
             let fontSize = sampler.subtitleFontSize
-            let nsFont = NSFont(name: dotsFontName(forSize: fontSize), size: fontSize)
-                ?? NSFont.boldSystemFont(ofSize: fontSize)
             let arrow = updateArrowFrame(afterTextRect: sr, fontSize: fontSize)
-            // 대문자(cap) 세로 중앙에 맞춘다.
-            let midY = sr.minY + nsFont.ascender - nsFont.capHeight / 2
-            let head = fontSize * 0.26
-            var path = Path()
-            path.move(to: CGPoint(x: arrow.minX, y: midY))
-            path.addLine(to: CGPoint(x: arrow.maxX, y: midY))
-            path.move(to: CGPoint(x: arrow.maxX - head, y: midY - head))
-            path.addLine(to: CGPoint(x: arrow.maxX, y: midY))
-            path.addLine(to: CGPoint(x: arrow.maxX - head, y: midY + head))
-            context.stroke(
-                path, with: .color(accentColor),
-                style: StrokeStyle(lineWidth: max(2, fontSize * 0.09),
-                                   lineCap: .round, lineJoin: .round))
+            let resolved = context.resolve(
+                Text(updateArrowGlyph)
+                    .font(.custom(dotsFontName(forSize: fontSize), size: fontSize))
+                    .foregroundColor(accentColor)
+            )
+            context.draw(resolved, at: CGPoint(x: arrow.minX, y: sr.minY), anchor: .topLeading)
         }
 
         // "CANCEL" 또는 "X  GO" — 모두 같은 적응형 색으로 렌더 (단일 Text).
