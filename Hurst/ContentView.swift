@@ -1484,7 +1484,8 @@ struct ContentView: View {
         ZStack {
             WindowDragArea(
                 onSingleClick: {
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil || isPeeking { return }
+                    // peek 중에도 탭 재생/일시정지는 허용 (전체화면/일반 공통).
+                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
                     if isStandby {
                         _ = resumeLastMedia()
                     } else {
