@@ -1151,6 +1151,31 @@ private struct DotsOverlayView: View {
         func luminance(_ c: (Double, Double, Double)) -> Double {
             0.2126 * lin(c.0) + 0.7152 * lin(c.1) + 0.0722 * lin(c.2)
         }
+
+        // Adaptive OFF: 글씨가 고정 흰/검이므로 색면도 그 반대(검/흰)로 고정.
+        // 아래 hue-추종 로직(유채색 색면 생성)은 건너뛴다.
+        if !adaptiveSubtitleColor {
+            let lText = luminance((tr, tg, tb))
+            let textIsBright = lText > 0.5
+            let opposite: (Double, Double, Double) = textIsBright ? (0, 0, 0) : (1, 1, 1)
+            func contrastWorstMono(_ alpha: Double) -> Double {
+                let eff = (alpha * opposite.0 + (1 - alpha) * tr,
+                           alpha * opposite.1 + (1 - alpha) * tg,
+                           alpha * opposite.2 + (1 - alpha) * tb)
+                let lBg = luminance(eff)
+                let hi = Swift.max(lText, lBg), lo = Swift.min(lText, lBg)
+                return (hi + 0.05) / (lo + 0.05)
+            }
+            if contrastWorstMono(baseAlpha) >= target {
+                return rgba(opposite, baseAlpha)
+            }
+            var lo = baseAlpha, hi = 1.0
+            for _ in 0..<16 {
+                let mid = (lo + hi) / 2
+                if contrastWorstMono(mid) >= target { hi = mid } else { lo = mid }
+            }
+            return rgba(opposite, hi)
+        }
         func hsvToRgb(_ h: Double, _ s: Double, _ v: Double) -> (Double, Double, Double) {
             if s <= 0 { return (v, v, v) }
             let h6 = (h - floor(h)) * 6
