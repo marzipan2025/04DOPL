@@ -25,7 +25,57 @@ class VideoSampler: ObservableObject {
         let displayW: Int
         let displayH: Int
         let frameGeneration: UInt64
+        let zoomPermille: Int
     }
+
+    // 전체화면 콘텐츠 줌 (fit 대비 배율).
+    //   fit    = 화면 안에 비율 유지로 맞춤(기본, 여백 발생 가능)
+    //   fill   = 비율 유지로 화면을 꽉 채움(넘치는 부분 중앙 크롭)
+    //   custom = 핀치 제스처로 만든 임의 배율 (1.0 = fit)
+    enum ContentZoom: Equatable {
+        case fit
+        case fill
+        case custom(CGFloat)
+    }
+    @Published var contentZoom: ContentZoom = .fit
+
+    static let maxContentZoom: CGFloat = 8.0
+
+    /// fit 대비 fill 배율. 디스플레이/비디오 비율이 같으면 1.
+    private func fillScale(dispW: CGFloat, dispH: CGFloat, videoAspect: CGFloat) -> CGFloat {
+        let displayAspect = dispW / dispH
+        return displayAspect > videoAspect
+            ? displayAspect / videoAspect
+            : videoAspect / displayAspect
+    }
+
+    /// 현재 모드의 실효 배율 (fit 기준 1.0).
+    private func effectiveZoom(dispW: CGFloat, dispH: CGFloat, videoAspect: CGFloat) -> CGFloat {
+        switch contentZoom {
+        case .fit:              return 1.0
+        case .fill:             return fillScale(dispW: dispW, dispH: dispH, videoAspect: videoAspect)
+        case .custom(let z):    return z
+        }
+    }
+
+    /// 현재 표시 상태의 실효 콘텐츠 줌 (fit=1). 피크 레이어 등 외부 뷰 동기화용.
+    func currentEffectiveZoom() -> CGFloat {
+        let dispW = currentDisplaySize.width, dispH = currentDisplaySize.height
+        guard dispW > 0, dispH > 0, videoSize.width > 0, videoSize.height > 0 else { return 1 }
+        return effectiveZoom(dispW: dispW, dispH: dispH,
+                             videoAspect: videoSize.width / videoSize.height)
+    }
+
+    /// 핀치 제스처 증분 적용. 현재 실효 배율에서 이어서 커스텀 배율로 전환.
+    func zoomBy(magnification delta: CGFloat) {
+        guard currentDisplaySize.width > 0, currentDisplaySize.height > 0,
+              videoSize.width > 0, videoSize.height > 0 else { return }
+        let next = min(max(currentEffectiveZoom() * (1 + delta), 1.0), Self.maxContentZoom)
+        contentZoom = next <= 1.0 ? .fit : .custom(next)
+    }
+
+    func zoomToFit()  { contentZoom = .fit }
+    func zoomToFill() { contentZoom = .fill }
 
     @Published var dotColors: [[CGColor]] = []
     @Published var videoSize: CGSize = .zero
@@ -1319,11 +1369,18 @@ class VideoSampler: ObservableObject {
 
         // 비디오가 멈춰 있거나(새 프레임 없음), 이미지 모드(프레임 고정)일 때는
         // gridSize/창 크기 변화가 없으면 동일 픽셀 버퍼를 반복 샘플링할 필요가 없다.
+        let sigAspect = videoSize.height > 0 ? videoSize.width / videoSize.height : 1
+        let sigZoom = effectiveZoom(
+            dispW: max(currentDisplaySize.width, 1),
+            dispH: max(currentDisplaySize.height, 1),
+            videoAspect: sigAspect
+        )
         let sig = RenderSignature(
             gridSize: Int(gridSize.rounded()),
             displayW: Int(currentDisplaySize.width.rounded()),
             displayH: Int(currentDisplaySize.height.rounded()),
-            frameGeneration: videoFrameGeneration
+            frameGeneration: videoFrameGeneration,
+            zoomPermille: Int((sigZoom * 1000).rounded())
         )
         if !didAdvanceFrame, sig == lastRenderSignature {
             return
@@ -1357,22 +1414,35 @@ class VideoSampler: ObservableObject {
             fittedH = fittedW / videoAspect
         }
 
-        let cols = max(1, Int(fittedW / gridSize))
-        let rows = max(1, Int(fittedH / gridSize))
+        // 콘텐츠 줌: fit 대비 배율만큼 확대하고, 화면 밖으로 넘치는 부분은 중앙 크롭.
+        // 확대되어도 그리드/도트 크기는 그대로 — 버퍼에서 샘플링하는 소스 영역만 줄어든다.
+        let zoom = effectiveZoom(dispW: dispW, dispH: dispH, videoAspect: videoAspect)
+        let scaledW = fittedW * zoom
+        let scaledH = fittedH * zoom
+        let visibleW = min(dispW, scaledW)
+        let visibleH = min(dispH, scaledH)
 
-        let strideX = max(1, bufWidth  / cols)
-        let strideY = max(1, bufHeight / rows)
+        let cols = max(1, Int(visibleW / gridSize))
+        let rows = max(1, Int(visibleH / gridSize))
+
+        let srcW = CGFloat(bufWidth)  * (visibleW / scaledW)
+        let srcH = CGFloat(bufHeight) * (visibleH / scaledH)
+        let srcX0 = (CGFloat(bufWidth)  - srcW) / 2
+        let srcY0 = (CGFloat(bufHeight) - srcH) / 2
+
+        let strideX = max(1.0, srcW / CGFloat(cols))
+        let strideY = max(1.0, srcH / CGFloat(rows))
 
         var newColors: [[CGColor]] = []
         newColors.reserveCapacity(rows)
 
         for row in 0..<rows {
-            let sampleY = min(row * strideY + strideY / 2, bufHeight - 1)
+            let sampleY = min(max(0, Int(srcY0 + (CGFloat(row) + 0.5) * strideY)), bufHeight - 1)
             var rowColors: [CGColor] = []
             rowColors.reserveCapacity(cols)
 
             for col in 0..<cols {
-                let sampleX = min(col * strideX + strideX / 2, bufWidth - 1)
+                let sampleX = min(max(0, Int(srcX0 + (CGFloat(col) + 0.5) * strideX)), bufWidth - 1)
                 let offset  = sampleY * bytesPerRow + sampleX * 4
                 let ptr = baseAddress.advanced(by: offset).assumingMemoryBound(to: UInt8.self)
 
@@ -1410,6 +1480,7 @@ class VideoSampler: ObservableObject {
         lastPixelBuffer = nil
         dotColors = []
         videoSize = .zero
+        contentZoom = .fit
         isPlaying = false
         isStaticContent = false
         isAudioMode = false

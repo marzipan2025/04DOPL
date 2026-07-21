@@ -1248,6 +1248,7 @@ struct ContentView: View {
     @Environment(\.openWindow) private var openWindow
     @State private var hostWindow: NSWindow?
     @State private var keyMonitor: Any?
+    @State private var magnifyMonitor: Any?
     @State private var cursorHider = CursorAutoHider()
     @State private var isFullscreen = false
     @State private var isEditingURL = false
@@ -1735,11 +1736,16 @@ struct ContentView: View {
         .onDisappear {
             persistCurrentPlaybackPositionIfNeeded()
             if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+            if let m = magnifyMonitor { NSEvent.removeMonitor(m); magnifyMonitor = nil }
             cursorHider.stop()
             releaseSleepAssertion()
             restorePlaybackPositionTask?.cancel()
         }
-        .onChange(of: isFullscreen)     { _, _ in updateSleepPrevention() }
+        .onChange(of: isFullscreen)     { _, isFS in
+            updateSleepPrevention()
+            // 콘텐츠 줌은 전체화면 전용 — 나가면 fit 으로 복귀.
+            if !isFS { sampler.zoomToFit() }
+        }
         .onChange(of: sampler.isPlaying) { _, _ in updateSleepPrevention() }
         .onChange(of: sampler.isPlaying) { _, isPlaying in
             if !isPlaying {
@@ -2126,9 +2132,13 @@ struct ContentView: View {
     private func peekVideoLayer(size: CGSize, player: AVPlayer) -> some View {
         let appCornerRadius: CGFloat = 32
         let cornerR: CGFloat = isFullscreen ? 0 : appCornerRadius
+        // 전체화면 콘텐츠 줌을 피크 원본 영상에도 동일 적용.
+        // aspect-fit 레이어를 같은 배율로 scale → 도트 줌과 동일한 중앙 크롭.
+        let zoom = isFullscreen ? sampler.currentEffectiveZoom() : 1
 
         PlayerLayerView(player: player, isFullscreen: isFullscreen)
             .frame(width: size.width, height: size.height)
+            .scaleEffect(zoom)
             .clipShape(RoundedRectangle(cornerRadius: cornerR, style: .continuous))
     }
 
@@ -2412,6 +2422,13 @@ struct ContentView: View {
             if isEditingURL { return handleURLEditingKey(event) }
             return handlePlaybackKey(event)
         }
+        // 트랙패드 핀치 (전체화면 콘텐츠 줌). 뷰 히트테스트에 의존하지 않도록
+        // 키와 동일하게 로컬 이벤트 모니터로 받는다. magnification 은 이벤트당 증분값.
+        magnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [self] event in
+            guard isFullscreen, !isEditingURL else { return event }
+            sampler.zoomBy(magnification: event.magnification)
+            return nil
+        }
     }
 
     /// URL 편집 모드 전용 키 처리. Command 조합은 메뉴로 패스스루하되 ⌘V만 직접 처리.
@@ -2467,6 +2484,12 @@ struct ContentView: View {
             if event.keyCode == 35 { // ⌘P
                 openSubtitleFile()
                 return nil
+            }
+            // 전체화면 콘텐츠 줌: ⌘0 = fit, ⌘1 = fill.
+            // 창 모드의 ⌘0(Half Video Size) 메뉴보다 먼저 가로챈다.
+            if isFullscreen, let chars = event.charactersIgnoringModifiers {
+                if chars == "0" { sampler.zoomToFit();  return nil }
+                if chars == "1" { sampler.zoomToFill(); return nil }
             }
             // ⌘E(Export Image)는 File 메뉴 항목이 단축키를 소유하므로 여기선 메뉴로 패스.
             return event
