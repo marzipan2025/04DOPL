@@ -1457,6 +1457,16 @@ struct ContentView: View {
         recents.addURL(urlString, title: normalizedTitle.isEmpty ? nil : normalizedTitle)
     }
 
+    /// yt-dlp 로 얻은 제목을 제목 없는 URL 항목에 보강 (최근 항목 / 재생 정보).
+    private func applyResolvedURLTitle(_ resolved: VideoSampler.ResolvedURLTitle?) {
+        guard let resolved,
+              lastMediaKind == "url",
+              lastMediaValue == resolved.sourceURL,
+              lastMediaTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        lastMediaTitle = resolved.title
+        recents.addURL(resolved.sourceURL, title: resolved.title)
+    }
+
     private func prepareForURLPlayback() {
         playlist = []
         playlistIndex = 0
@@ -1781,6 +1791,7 @@ struct ContentView: View {
         .onChange(of: tapToPeek) { _, enabled in
             if !enabled { endPeekIfNeeded() }
         }
+        .onChange(of: sampler.resolvedURLTitle) { _, resolved in applyResolvedURLTitle(resolved) }
         .onChange(of: sampler.videoSize) { _, newSize in
             // 오픈 경로에서 세운 플래그가 켜진 상태에서 실제 크기 확보되면 1회 실행.
             if pendingAutoResize && newSize.width > 0 && newSize.height > 0 {
@@ -1970,12 +1981,15 @@ struct ContentView: View {
               savedSeconds >= 1 else { return }
 
         restorePlaybackPositionTask = Task {
-            for _ in 0..<30 {
+            var attempts = 0
+            while attempts < 30 {
                 if Task.isCancelled { return }
                 if sampler.previewPlayer?.currentItem != nil {
                     sampler.seek(toSeconds: savedSeconds)
                     return
                 }
+                // remux / 웹 URL 해석 중에는 대기 횟수를 소모하지 않는다.
+                if !sampler.isLoadingMedia { attempts += 1 }
                 try? await Task.sleep(nanoseconds: 200_000_000)
             }
         }
