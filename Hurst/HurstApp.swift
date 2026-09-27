@@ -673,6 +673,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
+    /// 종료 직전에 돌려야 하는 정리. ContentView 가 등록한다 — 저장에 필요한 상태가 거기 있다.
+    static var willTerminateCleanup: (() -> Void)?
+
+    /// **모든 종료 경로가 여기를 지난다** — ⌘Q, ⌘W(Close Window), 좌상단 도트, Dock 종료.
+    /// SwiftUI 의 onDisappear 는 앱이 꺼질 때 도는 게 보장되지 않아서, 정리를 거기에만
+    /// 두면 재생 위치를 잃는다(재생 중 종료 시 마지막 저장 이후 구간).
+    func applicationWillTerminate(_ notification: Notification) {
+        Self.willTerminateCleanup?()
+    }
+
     /// Finder "Open With…" / 파일 더블클릭 / `open` 커맨드 / 커스텀 URL 스킴 진입점.
     /// 파일 URL 은 플레이리스트 로직으로, 앱 전용 스킴은 직접 재생 가능한 미디어 URL 문자열로 브로드캐스트한다.
     /// 앱 기동 중이면 `applicationDidFinishLaunching` 이후 ContentView 가 observer 를

@@ -11,6 +11,8 @@ struct WindowDragArea: NSViewRepresentable {
     var onRightClick: ((CGPoint) -> Void)?
     var onScrollUp: (() -> Void)?
     var onScrollDown: (() -> Void)?
+    /// 확대 중이면 ⌘ 드래그가 "보는 위치 이동"이라 창이 따라 움직이면 안 된다.
+    var isContentZoomed: Bool = false
 
     func makeNSView(context: Context) -> WindowDragNSView {
         let view = WindowDragNSView()
@@ -35,6 +37,7 @@ struct WindowDragArea: NSViewRepresentable {
         nsView.onRightClick = onRightClick
         nsView.onScrollUp = onScrollUp
         nsView.onScrollDown = onScrollDown
+        nsView.isContentZoomed = isContentZoomed
     }
 
     func makeCoordinator() -> Coordinator {
@@ -92,14 +95,25 @@ class WindowDragNSView: NSView {
     var onScrollDown: (() -> Void)?
     
     private var scrollAccumulator: CGFloat = 0
-    
+
     override var isFlipped: Bool { true }
-    override var mouseDownCanMoveWindow: Bool { true }
-    
-    // mouseDown 에서 performDrag를 즉시 호출하면 모바일 터치이벤트루프를 먹어버리므로, 
+
+    /// 확대 중일 때만 유효. ⌘ 드래그를 창 이동이 아니라 화면 이동으로 넘긴다.
+    var isContentZoomed: Bool = false
+
+    /// 창 이동은 여기서 시작된다 — AppKit 이 mouseDown 시점에 이 값을 물어본다.
+    /// 확대 상태의 ⌘ 드래그는 보는 위치를 옮기는 동작이라 창까지 끌리면 안 된다.
+    override var mouseDownCanMoveWindow: Bool {
+        !(isContentZoomed && NSEvent.modifierFlags.contains(.command))
+    }
+
+    // mouseDown 에서 performDrag를 즉시 호출하면 모바일 터치이벤트루프를 먹어버리므로,
     // 실제로 드래그가 발생할 때만 넘겨 싱글/더블 클릭 제스처가 씹히지 않게 함.
-    override func mouseDragged(with event: NSEvent) { 
-        window?.performDrag(with: event) 
+    override func mouseDragged(with event: NSEvent) {
+        // performDrag 는 자체 이벤트 루프를 돌려 이후 마우스 이벤트를 전부 먹는다.
+        // ⌘ 드래그(화면 이동)에서 이게 걸리면 SwiftUI 제스처가 첫 몇 이벤트만 받고 끊긴다.
+        if isContentZoomed, event.modifierFlags.contains(.command) { return }
+        window?.performDrag(with: event)
     }
     
     override func rightMouseUp(with event: NSEvent) {
@@ -163,7 +177,14 @@ final class PlayerLayerNSView: NSView {
 
     override func layout() {
         super.layout()
+        // 줌·리사이즈로 이 뷰의 크기가 매 단계 바뀐다(영상 전체 크기로 잡으므로).
+        // CALayer 는 frame 변경에 0.25초짜리 암시적 애니메이션을 붙이는데 — 레이어를
+        // 직접 만들어 붙인 서브레이어라 AppKit 이 막아주지 않는다 — 그러면 확대할 때마다
+        // 영상이 모서리에서 밀려 들어오는 모션이 생긴다. 즉시 반영해야 도트와 어긋나지 않는다.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
         playerLayer.frame = bounds
+        CATransaction.commit()
     }
     // 피크 영역 위로 마우스가 지나가도 드래그나 다른 제스처를 막지 않도록 히트테스트 투과.
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -366,6 +387,12 @@ final class CursorAutoHider {
         timer?.invalidate(); timer = nil
         if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
     }
+    /// 마우스 이동이 아닌 이유로 커서를 다시 보여줘야 할 때(핀치 줌 앵커 확인).
+    /// 숨김 규칙은 mouseMoved 로만 풀리므로, 손가락만 움직이는 핀치에서는 직접 풀어야 한다.
+    func reveal() {
+        NSCursor.setHiddenUntilMouseMoves(false)
+        schedule()
+    }
     private func schedule() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: idle, repeats: false) { _ in
@@ -452,6 +479,17 @@ private struct DotGridLayout {
             if !isCornerMasked(c.x, c.y) { return colIdx }
         }
         return col
+    }
+
+    /// 종료 히트박스 앵커: 최좌상단 visible 도트. (위에서 아래로, 각 행의 왼쪽부터 탐색)
+    func findTopLeftAnchor() -> (row: Int, col: Int)? {
+        for rowIdx in 1..<(totalRows - 1) {
+            for colIdx in 1..<(totalCols - 1) {
+                let c = center(row: rowIdx, col: colIdx)
+                if !isCornerMasked(c.x, c.y) { return (rowIdx, colIdx) }
+            }
+        }
+        return nil
     }
 
     /// 피크 히트박스 앵커: 최우상단 visible 도트. (위에서 아래로, 각 행의 오른쪽부터 탐색)
@@ -787,12 +825,32 @@ private struct DotsOverlayView: View {
                     sampN2 += 1
                 }
 
-                // 피크 중엔 실제 영상을 드러내되, 피크 토글을 되돌릴 우상단 도트만 흰색으로 남긴다.
+                // 피크 중엔 실제 영상을 드러내되, 피크 토글을 되돌릴 우상단 도트는 남긴다.
                 // anchor는 동일 레이아웃에서 계산하므로 도트 크기/간격 변화에 그대로 따라간다.
                 if isPeeking {
+                    // 깜빡임이 켜져 있는 동안은 앵커도 같은 색으로 간다. 한계치 알림처럼
+                    // 악센트 색으로 깜빡일 때 앵커만 흰 점으로 남으면 눈에 거슬린다.
+                    let blinkColor = (sampler.overlayIsAlert || !sampler.isPlaying)
+                        ? accentColor : indicatorColorPlay
                     if let peekAnchor, rowIdx == peekAnchor.row, colIdx == peekAnchor.col {
                         let dotRect = CGRect(x: c.x - layout.half, y: c.y - layout.half, width: dotD, height: dotD)
-                        context.fill(Path(ellipseIn: dotRect), with: .color(indicatorColorPlay))
+                        // 깜빡임이 꺼진 위상에서도 앵커는 계속 보여야 한다 — 피크를 되돌릴
+                        // 유일한 표적이라서 사라지면 안 된다.
+                        context.fill(Path(ellipseIn: dotRect),
+                                     with: .color(hasOverlay && isBlinkOn ? blinkColor : indicatorColorPlay))
+                        continue
+                    }
+                    // 볼륨/탐색 직선은 피크 중에도 그린다. 조작은 피크 중에도 먹히는데
+                    // 도트를 통째로 건너뛰면 확인할 방법이 없다.
+                    // 글자 영역은 도트 모드와 똑같이 파낸다 — 안 그러면 재생/일시정지
+                    // 테두리가 좌하단 자막 위에 겹쳐 찍힌다.
+                    if hasOverlay, isBlinkOn,
+                       isOverlayDot(effect: effect, row: rowIdx, col: colIdx,
+                                    totalRows: layout.totalRows, totalCols: layout.totalCols),
+                       !shouldHideDot(at: c, rect: subtitleHideRect, half: layout.half),
+                       !shouldHideDot(at: c, rect: rightBlockHideRect, half: layout.half) {
+                        let dotRect = CGRect(x: c.x - layout.half, y: c.y - layout.half, width: dotD, height: dotD)
+                        context.fill(Path(ellipseIn: dotRect), with: .color(blinkColor))
                     }
                     continue
                 }
@@ -1283,6 +1341,10 @@ struct ContentView: View {
     @State private var subtitlePromptURL: URL? = nil
     /// 우상단 도트를 누르고 있는 동안 true. onChanged가 연속 발생하므로 idempotent하게 갱신.
     @State private var isPeeking = false
+    /// 피크 도트의 화면상 사각형(캔버스 좌표). 롤아웃 감시가 커서 이탈 판정에 쓴다.
+    @State private var peekDotRect: CGRect = .zero
+    /// 피크 중 커서가 도트를 벗어나는지 감시하는 이벤트 모니터.
+    @State private var peekRolloutMonitor: Any? = nil
     /// 항상 위 (floating window level). 풀스크린 중에는 시각적으로 비활성.
     @State private var isAlwaysOnTop = false
     /// 풀스크린 재생 중 잠자기 방지 토큰. nil = 방지 비활성.
@@ -1317,6 +1379,9 @@ struct ContentView: View {
     @State private var pendingAutoResize: Bool = false
     
     @State private var dragAccumulator: CGSize = .zero
+    /// 캔버스 드래그가 무슨 동작인지. 제스처가 시작될 때 정해 끝날 때까지 유지한다.
+    private enum CanvasDragMode { case dotSettings, panContent }
+    @State private var canvasDragMode: CanvasDragMode?
     @State private var currentPlaybackPositionKey: String?
     @State private var restorePlaybackPositionTask: Task<Void, Never>?
 
@@ -1382,6 +1447,19 @@ struct ContentView: View {
             && !sampler.isAudioMode
             && !isEditingURL
             && !isShowingPlaybackInfo
+    }
+
+    /// 좌상단 도트로 종료할 수 있는 상태.
+    ///
+    /// **실제 도트가 그려질 때(= 도트 모드/피크 모드)만**이다. 대기 화면과 로딩 중에는
+    /// 격자가 영상이 아니라 제외하고, 무언가 묻고 있을 때(URL 입력·재생 정보·자막 프롬프트)도
+    /// 뺀다 — 보이지 않는 버튼이라 그런 상태에서 눌리면 실수로 꺼지는 것과 구별되지 않는다.
+    private var canQuitByCornerDot: Bool {
+        !sampler.dotColors.isEmpty
+            && !sampler.isLoadingMedia
+            && !isEditingURL
+            && !isShowingPlaybackInfo
+            && subtitlePromptURL == nil
     }
 
     /// 대기 상태: 앱 기동 후 아무것도 로드되지 않았거나 cleanup된 직후.
@@ -1531,10 +1609,12 @@ struct ContentView: View {
                     toggleMainAppFullscreen()
                 },
                 onRightClick: { point in
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil || isPeeking { return }
+                    // 피크 중에도 허용 — 세로줄 클릭 탐색은 실제 영상을 보면서 쓸 때 오히려 유용하다.
+                    // (우상단 도트는 피크 토글이라 아래에서 따로 제외한다.)
+                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
                     if isStandby { return }
                     if sampler.isLoadingMedia || sampler.isStaticContent { return }
-                    
+
                     let size = sampler.currentDisplaySize
                     let grid = sampler.gridSize
                     // 현재 재생 그리드의 도트 데이터
@@ -1543,17 +1623,24 @@ struct ContentView: View {
                     guard cols > 2 else { return }
                     let rows = sampler.dotColors.count
                     guard rows > 2 else { return }
-                    
+
                     let visibleCols = cols - 2
                     let offsetX = (size.width - CGFloat(cols) * grid) / 2
                     let offsetY = (size.height - CGFloat(rows) * grid) / 2
-                    
+
                     let clickedColIdx = Int((point.x - offsetX) / grid)
                     let clickedRowIdx = Int((point.y - offsetY) / grid)
-                    
+
                     if clickedColIdx >= 1 && clickedColIdx <= visibleCols {
-                        // 우상단 우클릭이라면 (1번 row, 마지막 col) 피크영역이므로 점프하지 않음
-                        if clickedColIdx == visibleCols && clickedRowIdx == 1 {
+                        // 피크 도트 자리는 점프시키지 않는다. 위치를 (1, cols-2) 로 가정하면
+                        // 안 된다 — 도트 간격을 30 아래로 좁히면 모서리 마스크가 켜지면서
+                        // 실제 앵커가 안쪽으로 밀린다. 렌더와 같은 계산을 그대로 쓴다.
+                        let layout = makeDotGridLayout(
+                            size: size, grid: grid, dotDiameter: sampler.dotDiameter,
+                            rowsOverride: rows, colsOverride: cols, isFullscreen: isFullscreen
+                        )
+                        if let anchor = layout.findTopRightAnchor(),
+                           clickedColIdx == anchor.col, clickedRowIdx == anchor.row {
                             return
                         }
                         // 1부터 visibleCols 까지의 값을 해당 컬럼의 정중앙 시간(0.5 오프셋)으로 매핑하여 깜빡임과 인덱싱 일치
@@ -1562,13 +1649,14 @@ struct ContentView: View {
                     }
                 },
                 onScrollUp: {
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil || isPeeking { return }
+                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
                     sampler.volumeUp()
                 },
                 onScrollDown: {
-                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil || isPeeking { return }
+                    if isEditingURL || isShowingPlaybackInfo || subtitlePromptURL != nil { return }
                     sampler.volumeDown()
-                }
+                },
+                isContentZoomed: sampler.isContentZoomed
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -1647,6 +1735,14 @@ struct ContentView: View {
                 }
             }
 
+            // 종료 히트박스: 좌상단 visible 도트 1개 영역. 눌러서 앱 종료.
+            // 우상단 피크 도트와 대칭인 숨은 조작 — 눈에 보이는 버튼은 없다.
+            if canQuitByCornerDot {
+                GeometryReader { geo in
+                    quitHitArea(size: geo.size)
+                }
+            }
+
             // Always on Top 표시: 2px 여백 + 1px 악센트 테두리.
             // 앱 라운딩(32pt)과 동심원으로, 창 안쪽 2.5pt(= 2px gap + 0.5px 선 반폭) 위치에 렌더.
             if isAlwaysOnTop && !isFullscreen {
@@ -1699,8 +1795,24 @@ struct ContentView: View {
         .gesture(
             DragGesture(minimumDistance: 10)
                 .onChanged { value in
+                    // ⌘ 를 누른 채 시작했으면 확대해서 보고 있는 위치를 옮긴다.
+                    // 판정은 제스처 시작 때 한 번만 — 끄는 도중 ⌘ 를 놓았다고 도트 크기가
+                    // 변하기 시작하면 곤란하다. (DragGesture 값에는 수식 키가 없어서
+                    // 현재 키 상태를 직접 읽는다.)
+                    if canvasDragMode == nil {
+                        canvasDragMode = (sampler.isContentZoomed
+                                          && NSEvent.modifierFlags.contains(.command))
+                            ? .panContent : .dotSettings
+                    }
+                    if canvasDragMode == .panContent {
+                        sampler.panBy(dx: value.translation.width  - dragAccumulator.width,
+                                      dy: value.translation.height - dragAccumulator.height)
+                        dragAccumulator = value.translation
+                        return
+                    }
+
                     guard isFullscreen else { return }
-                    
+
                     let deltaX = value.translation.width - dragAccumulator.width
                     let deltaY = value.translation.height - dragAccumulator.height
                     
@@ -1724,6 +1836,7 @@ struct ContentView: View {
                 }
                 .onEnded { _ in
                     dragAccumulator = .zero
+                    canvasDragMode = nil
                 }
         )
         .background(
@@ -1743,6 +1856,12 @@ struct ContentView: View {
         interactiveCanvas
         .onAppear {
             installKeyMonitor()
+            // 종료 정리를 앱 델리게이트에 건다. onDisappear 에도 같은 정리가 있지만
+            // 그건 앱이 꺼질 때 도는 게 보장되지 않는다 — 이걸 걸지 않으면 ⌘Q·⌘W·좌상단
+            // 도트 어느 쪽으로 꺼도 재생 위치를 잃는다.
+            AppDelegate.willTerminateCleanup = {
+                persistCurrentPlaybackPositionIfNeeded()
+            }
             Task { updateAvailableVersion = await UpdateChecker.availableUpdateVersion() }
             DispatchQueue.main.async {
                 if let hostWindow {
@@ -1812,12 +1931,28 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
             isFullscreen = true
+            sampler.isFullscreen = true
             cursorHider.start()
             sampler.backgroundDotAlpha = (fullscreenBackgroundStyle == .black) ? 0.10 : 0.40
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+            // 롤아웃 모드에서만 끝낸다. 그쪽은 "커서가 도트를 벗어나면 종료"인데 다른 앱으로
+            // 넘어가면 마우스 이동 이벤트가 안 와서, 안 끝내면 peek 에 갇힌다.
+            //
+            // tap to peek 은 반대다. 한 번 눌러 켜고 다시 눌러 끄는 명시적 토글이라
+            // 커서 위치에 의존하지 않는다. 여기서 같이 끝내면 다른 앱을 잠깐 보고 돌아왔을 때
+            // 멋대로 도트로 돌아가 있다.
+            guard !tapToPeek else { return }
+            endPeekIfNeeded()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { _ in
             isFullscreen = false
+            sampler.isFullscreen = false
             cursorHider.stop()
+            // 전체화면을 나오면 피크도 끝낸다 — 도트로 돌아가며 멈춘다(peekEnd 가 항상 pause).
+            // Esc 키가 아니라 여기에 거는 이유: Return·더블클릭·초록 버튼으로 나갈 때도
+            // 같아야 한다. 키에만 걸면 나가는 경로마다 결과가 달라진다.
+            endPeekIfNeeded()
             // 풀스크린 전에 항상 위가 켜져 있었다면 복원
             if isAlwaysOnTop { applyAlwaysOnTop(true) }
             sampler.backgroundDotAlpha = 0.40
@@ -2165,20 +2300,67 @@ struct ContentView: View {
 
     // MARK: 피크 (우상단 도트 프레스 = 실제 영상 노출)
 
-    /// 피크 영상 컨테이너. 창 전체를 채우며 앱 창 모서리 곡률(32pt)로 클립.
-    /// 풀스크린에서는 라운딩 없음.
+    /// 피크 영상 컨테이너. 창 전체를 채운다. 모서리 곡률은 여기서 만들지 않는다 —
+    /// 창 자체 마스크(`contentView.layer` cornerRadius 32 + masksToBounds)가 이미 자른다.
     @ViewBuilder
     private func peekVideoLayer(size: CGSize, player: AVPlayer) -> some View {
-        let appCornerRadius: CGFloat = 32
-        let cornerR: CGFloat = isFullscreen ? 0 : appCornerRadius
-        // 전체화면 콘텐츠 줌을 피크 원본 영상에도 동일 적용.
-        // aspect-fit 레이어를 같은 배율로 scale → 도트 줌과 동일한 중앙 크롭.
-        let zoom = isFullscreen ? sampler.currentEffectiveZoom() : 1
+        // 콘텐츠 줌을 피크 원본 영상에도 동일 적용.
+        //
+        // **영상 전체가 들어가는 사각형을 그 크기 그대로** 만들고, 창 중앙 기준으로 옮긴 뒤,
+        // 창 밖으로 나가는 부분을 잘라낸다.
+        //
+        // 창 크기 레이어에 scaleEffect + offset 을 거는 방식은 쓰면 안 된다. 창 모드의
+        // .resizeAspectFill 은 넘치는 부분을 **레이어가 이미 잘라 버려서**, 옮겨도 잘려나간
+        // 영상이 드러나는 게 아니라 뒤의 검은 배경이 나온다(전체화면은 .resizeAspect 라
+        // 영상 전체가 레이어 안에 있어 우연히 멀쩡했다).
+        //
+        // 확대하지 않았을 때는 이 사각형이 예전 그대로다 — 창 모드면 창을 덮는 크기,
+        // 전체화면이면 레터박스 포함 fit 크기.
+        let layout = sampler.peekContentLayout(displaySize: size)
 
         PlayerLayerView(player: player, isFullscreen: isFullscreen)
+            .frame(width:  layout?.size.width  ?? size.width,
+                   height: layout?.size.height ?? size.height)
+            .offset(x: layout?.offset.width ?? 0, y: layout?.offset.height ?? 0)
             .frame(width: size.width, height: size.height)
-            .scaleEffect(zoom)
-            .clipShape(RoundedRectangle(cornerRadius: cornerR, style: .continuous))
+            // 여기서는 **직사각형으로만** 자른다(확대하면 위 사각형이 창보다 커지므로 잘라야 한다).
+            // 모서리 곡률을 여기서 또 주면 안 된다 — 창 자체 마스크와 이중으로 겹치는데,
+            // 영상 레이어는 GPU 가 따로 합성해서 그 위에 씌운 곡선 마스크가 계단처럼 나온다.
+            // 곡률은 창 마스크 하나에만 맡기면 배경·도트와 같은 경계를 그대로 쓴다.
+            .clipped()
+    }
+
+    /// 종료 히트 영역: 좌상단 visible 도트 한 칸 크기의 투명 영역.
+    /// 우상단 피크 도트와 같은 방식의 숨은 조작이고, 도트·피크 모드 모두에서 동작한다.
+    @ViewBuilder
+    private func quitHitArea(size: CGSize) -> some View {
+        let grid = sampler.gridSize
+        let rows = sampler.dotColors.count
+        let cols = sampler.dotColors.first?.count ?? 0
+        let layout = makeDotGridLayout(
+            size: size, grid: grid, dotDiameter: sampler.dotDiameter,
+            rowsOverride: rows > 0 ? rows : nil,
+            colsOverride: cols > 0 ? cols : nil,
+            isFullscreen: isFullscreen
+        )
+        // 격자가 아주 좁으면(작은 창 + 넓은 간격) 좌상단과 우상단 앵커가 같은 도트가 된다.
+        // 그때는 그 자리를 피크에 양보한다 — 종료는 ⌘Q 로도 되지만 피크를 부를 데는 여기뿐이다.
+        let peekAnchor = canPeek ? layout.findTopRightAnchor() : nil
+        if let anchor = layout.findTopLeftAnchor(),
+           !(peekAnchor?.row == anchor.row && peekAnchor?.col == anchor.col) {
+            let c = layout.center(row: anchor.row, col: anchor.col)
+            Color.clear
+                .contentShape(Rectangle())
+                .frame(width: grid, height: grid)
+                .position(x: c.x, y: c.y)
+                .onTapGesture { quitApp() }
+        }
+    }
+
+    /// 좌상단 도트 = 앱 종료.
+    /// 저장은 `AppDelegate.applicationWillTerminate` 가 한다 — ⌘Q·⌘W 와 같은 경로다.
+    private func quitApp() {
+        NSApp.terminate(nil)
     }
 
     /// 피크 히트 영역: 우상단 visible 도트 한 칸 크기의 투명 영역.
@@ -2203,10 +2385,23 @@ struct ContentView: View {
                     .position(x: c.x, y: c.y)
                     .onTapGesture { togglePeek() }
             } else {
+                // 누르면 시작, **커서가 도트를 벗어나면** 끝난다.
+                //
+                // 예전에는 버튼을 놓을 때 끝났는데, 보는 내내 누르고 있어야 해서 불편했다.
+                // 이제 한 번 누르면 손을 떼도 계속 보이고, 커서를 치우면 도트로 돌아온다.
+                //
+                // 끝나는 조건을 롤아웃 하나에만 맡기면 갇힌다 — 전체화면에서는 커서가 2초 뒤
+                // 자동으로 숨는데, 숨은 채 도트 위에 있으면 hover 가 안 빠져서 영영 peek 이다.
                 Color.clear
                     .contentShape(Rectangle())
                     .frame(width: grid, height: grid)
                     .position(x: c.x, y: c.y)
+                    .onAppear { peekDotRect = CGRect(x: c.x - grid / 2, y: c.y - grid / 2,
+                                                     width: grid, height: grid) }
+                    .onChange(of: c) { _, p in
+                        peekDotRect = CGRect(x: p.x - grid / 2, y: p.y - grid / 2,
+                                             width: grid, height: grid)
+                    }
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onChanged { _ in
@@ -2214,11 +2409,10 @@ struct ContentView: View {
                                 if !isPeeking {
                                     isPeeking = true
                                     sampler.peekStart()
+                                    startPeekRolloutWatch()
                                 }
                             }
-                            .onEnded { _ in
-                                endPeekIfNeeded()
-                            }
+                        // onEnded 없음 — 릴리즈로는 끝나지 않는다. 커서가 도트를 벗어나야 끝난다.
                     )
             }
         }
@@ -2233,7 +2427,31 @@ struct ContentView: View {
         }
     }
 
+    /// 커서가 피크 도트를 벗어나는지 감시한다.
+    ///
+    /// SwiftUI 의 onHover 로는 안 된다 — 도트 색이 초당 30번 바뀌면서 이 뷰가 계속 다시
+    /// 만들어지고, 그때마다 hover 추적 영역이 초기화돼 상태가 남지 않는다. 뷰 재생성과
+    /// 무관한 이벤트 모니터로 커서 위치를 직접 본다 (커서 자동 숨김이 쓰는 것과 같은 방식).
+    private func startPeekRolloutWatch() {
+        stopPeekRolloutWatch()
+        NSApplication.shared.windows.first?.acceptsMouseMovedEvents = true
+        peekRolloutMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDragged]) { event in
+            guard isPeeking, peekDotRect != .zero else { return event }
+            let h = sampler.currentDisplaySize.height
+            // locationInWindow 는 좌하단 원점, 캔버스 좌표는 좌상단 원점.
+            let point = CGPoint(x: event.locationInWindow.x, y: h - event.locationInWindow.y)
+            if !peekDotRect.contains(point) { endPeekIfNeeded() }
+            return event
+        }
+    }
+
+    private func stopPeekRolloutWatch() {
+        if let m = peekRolloutMonitor { NSEvent.removeMonitor(m) }
+        peekRolloutMonitor = nil
+    }
+
     private func endPeekIfNeeded() {
+        stopPeekRolloutWatch()
         guard isPeeking else { return }
         isPeeking = false
         sampler.peekEnd()
@@ -2461,13 +2679,30 @@ struct ContentView: View {
             if isEditingURL { return handleURLEditingKey(event) }
             return handlePlaybackKey(event)
         }
-        // 트랙패드 핀치 (전체화면 콘텐츠 줌). 뷰 히트테스트에 의존하지 않도록
+        // 트랙패드 핀치 (콘텐츠 줌, 창·전체화면 공통). 뷰 히트테스트에 의존하지 않도록
         // 키와 동일하게 로컬 이벤트 모니터로 받는다. magnification 은 이벤트당 증분값.
         magnifyMonitor = NSEvent.addLocalMonitorForEvents(matching: .magnify) { [self] event in
-            guard isFullscreen, !isEditingURL else { return event }
-            sampler.zoomBy(magnification: event.magnification)
+            guard !isEditingURL else { return event }
+            // 로컬 모니터는 앱 전체 이벤트를 받는다. 설정 창 위에서의 핀치까지 먹으면
+            // 보이지도 않는 뒤쪽 영상이 확대된다.
+            if let w = event.window, let host = hostWindow, w !== host { return event }
+            let anchor = zoomAnchor(for: event)
+            // 커서 자동 숨김은 전체화면에서만 돈다. 창 모드에서 부르면 오히려 숨김
+            // 타이머를 새로 걸어 커서가 사라진다.
+            if anchor != nil, isFullscreen { cursorHider.reveal() }
+            sampler.zoomBy(magnification: event.magnification, anchor: anchor)
             return nil
         }
+    }
+
+    /// 핀치 앵커 = 커서 위치. AppKit 은 좌하단 원점이라 y 를 뒤집어 캔버스 좌표에 맞춘다.
+    /// 캔버스는 창 전체를 덮으므로(ignoresSafeArea) 그 밖의 변환은 없다.
+    private func zoomAnchor(for event: NSEvent) -> CGPoint? {
+        let size = sampler.currentDisplaySize
+        guard size.width > 0, size.height > 0 else { return nil }
+        let height = (event.window ?? hostWindow)?.contentView?.bounds.height ?? size.height
+        let loc = event.locationInWindow
+        return CGPoint(x: loc.x, y: height - loc.y)
     }
 
     /// URL 편집 모드 전용 키 처리. Command 조합은 메뉴로 패스스루하되 ⌘V만 직접 처리.
@@ -2563,8 +2798,16 @@ struct ContentView: View {
             }
             return nil
         case 53:                                                              // Esc
+            // Esc 의 도착지는 언제나 "창 + 도트 + 정지" 하나다.
+            // 전체화면이면 나가는 것만으로 피크까지 정리된다(didExitFullScreen).
             if isFullscreen {
                 toggleMainAppFullscreen()
+                return nil
+            }
+            // tap to peek 은 명시적 토글이라 커서를 치워도 안 꺼진다. 키보드 탈출구를 준다.
+            // (누르고 있기 모드는 커서가 도트를 벗어나면 알아서 끝나므로 건드리지 않는다.)
+            if tapToPeek, isPeeking {
+                endPeekIfNeeded()
                 return nil
             }
             return event
