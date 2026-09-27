@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────
-# make_dmg.sh  —  04dopl 1.1.5 DMG 패키져 (ffmpeg 임베드 포함)
+# make_dmg.sh  —  04dopl 1.1.5 DMG 패키져 (ffmpeg / yt-dlp / deno 임베드 포함)
 # ─────────────────────────────────────────────────────────
 set -e
 
 APP_NAME="04dopl"
-VOL_NAME="04dopl 1.1.14"
-VERSION="1.1.14"
+VOL_NAME="04dopl 1.1.15"
+VERSION="1.1.15"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -35,7 +35,13 @@ DYLIB_SOURCES=(
   "/opt/homebrew/opt/svt-av1/lib/libSvtAv1Enc.4.dylib"
   "/opt/homebrew/opt/x264/lib/libx264.165.dylib"
   "/opt/homebrew/opt/x265/lib/libx265.216.dylib"
+  "/opt/homebrew/opt/little-cms2/lib/liblcms2.2.dylib"
+  "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib"
 )
+
+# yt-dlp 공식 standalone 바이너리 (Homebrew의 yt-dlp는 파이썬 venv에 의존하는 래퍼 스크립트라
+# 그대로 번들에 넣을 수 없음 — self-contained PyInstaller 빌드를 받아 쓴다)
+YTDLP_DOWNLOAD_URL="https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
 
 # Homebrew 경로를 번들 내부 경로로 교체
 # $1: 파일 경로  $2: rpath 접두사 (@executable_path/../Frameworks 또는 @loader_path)
@@ -63,7 +69,12 @@ if [ ! -x "/opt/homebrew/opt/ffmpeg/bin/ffmpeg" ]; then
   echo "Error: ffmpeg를 찾을 수 없습니다. brew install ffmpeg 를 먼저 실행하세요."; exit 1
 fi
 
-echo "▶ 1/5  Release 빌드 중…"
+# deno 존재 확인 (YouTube URL 해석용 — yt-dlp가 JS 챌린지를 풀 때 사용)
+if [ ! -x "/opt/homebrew/bin/deno" ]; then
+  echo "Error: deno를 찾을 수 없습니다. brew install deno 를 먼저 실행하세요."; exit 1
+fi
+
+echo "▶ 1/6  Release 빌드 중…"
 TEMP_DIR=$(mktemp -d)
 DERIVED_DATA_DIR="${TEMP_DIR}/DerivedData"
 xcodebuild \
@@ -85,7 +96,7 @@ APP_SRC="${BUILT_DIR}/${APP_NAME}.app"
 
 echo "    ✓ ${APP_SRC}"
 
-echo "▶ 2/5  스테이징 구성 중…"
+echo "▶ 2/6  스테이징 구성 중…"
 DMG_TEMP="${TEMP_DIR}/dmg_temp"
 mkdir -p "${DMG_TEMP}/.background"
 
@@ -93,7 +104,7 @@ cp -R "${APP_SRC}"  "${DMG_TEMP}/${APP_NAME}.app"
 ln -s /Applications  "${DMG_TEMP}/Applications"
 cp "${BG_IMG}"       "${DMG_TEMP}/.background/background.png"
 
-echo "▶ 3/5  ffmpeg 임베드 중…"
+echo "▶ 3/6  ffmpeg 임베드 중…"
 APP_BUNDLE="${DMG_TEMP}/${APP_NAME}.app"
 MACOS_DIR="${APP_BUNDLE}/Contents/MacOS"
 FW_DIR="${APP_BUNDLE}/Contents/Frameworks"
@@ -138,12 +149,31 @@ codesign --force --sign - --timestamp=none "$MACOS_DIR/ffmpeg"
 [ -f "$MACOS_DIR/ffprobe" ] && \
   codesign --force --sign - --timestamp=none "$MACOS_DIR/ffprobe"
 
-# 앱 번들 전체 재서명 (수정된 번들 포함)
-codesign --force --sign - --deep --timestamp=none "$APP_BUNDLE"
-
 echo "    ✓ ffmpeg 임베드 완료 (Frameworks: $(du -sh "$FW_DIR" | cut -f1))"
 
-echo "▶ 4/5  DMG 생성 및 Finder 창 설정 중…"
+echo "▶ 4/6  yt-dlp / deno 임베드 중… (YouTube URL 재생용)"
+
+# deno 바이너리 복사 (심링크 역참조) — homebrew dylib 참조 수정 + 코드서명은 아래 공통 단계에서
+cp /opt/homebrew/bin/deno "$MACOS_DIR/deno"
+chmod +x "$MACOS_DIR/deno"
+fix_homebrew_refs "$MACOS_DIR/deno" "@executable_path/../Frameworks"
+codesign --force --sign - --timestamp=none "$MACOS_DIR/deno"
+
+# yt-dlp 공식 standalone 바이너리 다운로드 (파이썬 의존성 없는 self-contained 빌드)
+YTDLP_TMP="${TEMP_DIR}/yt-dlp_macos"
+if ! curl -fL --retry 3 -o "$YTDLP_TMP" "$YTDLP_DOWNLOAD_URL"; then
+  echo "Error: yt-dlp standalone 바이너리를 내려받지 못했습니다 (${YTDLP_DOWNLOAD_URL})."; exit 1
+fi
+cp "$YTDLP_TMP" "$MACOS_DIR/yt-dlp"
+chmod +x "$MACOS_DIR/yt-dlp"
+codesign --force --sign - --timestamp=none "$MACOS_DIR/yt-dlp"
+
+echo "    ✓ yt-dlp $("$MACOS_DIR/yt-dlp" --version) + deno $("$MACOS_DIR/deno" --version | head -1 | awk '{print $2}') 임베드 완료"
+
+# 앱 번들 전체 재서명 (ffmpeg/yt-dlp/deno 등 새로 추가된 내용 포함해서 한 번에)
+codesign --force --sign - --deep --timestamp=none "$APP_BUNDLE"
+
+echo "▶ 5/6  DMG 생성 및 Finder 창 설정 중…"
 
 # 이전 마운트 정리
 if [ -d "/Volumes/${VOL_NAME}" ]; then
@@ -196,7 +226,7 @@ for i in 1 2 3 4 5; do
   [ ! -d "/Volumes/${VOL_NAME}" ] && break; sleep 1
 done
 
-echo "▶ 5/5  압축 DMG 변환 중…"
+echo "▶ 6/6  압축 DMG 변환 중…"
 mkdir -p "$(dirname "${OUTPUT}")"
 rm -f "${OUTPUT}"
 hdiutil convert "${TEMP_DIR}/temp.dmg" -format UDZO -o "${OUTPUT}" >/dev/null

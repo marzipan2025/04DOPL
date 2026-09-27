@@ -1082,6 +1082,21 @@ class VideoSampler: ObservableObject {
         return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
     }
 
+    /// deno(yt-dlp가 YouTube의 JS 챌린지를 풀 때 쓰는 JS 런타임) 경로. 번들 내장분 우선.
+    nonisolated private static func denoPath() -> String? {
+        var candidates: [String] = []
+        if let bundled = Bundle.main.url(forAuxiliaryExecutable: "deno") {
+            candidates.append(bundled.path)
+        }
+        candidates += [
+            "/opt/homebrew/bin/deno",
+            "/usr/local/bin/deno",
+            "/opt/local/bin/deno",
+            NSHomeDirectory() + "/.local/bin/deno"
+        ]
+        return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
+    }
+
     /// yt-dlp를 실행하고 exit code / stdout / stderr을 돌려준다.
     nonisolated private static func runYTDLP(ytdlpPath: String, arguments: [String], source: String, timeout: TimeInterval = 60) -> (exitCode: Int32, stdout: String, stderr: String) {
         let task = Process()
@@ -1143,19 +1158,28 @@ class VideoSampler: ObservableObject {
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("hurst-ytdl-\(UUID().uuidString).mp4")
 
+        // avc1+mp4a DASH 스트림은 대개 JS 챌린지 없이도 풀리지만, deno가 있으면 명시적으로
+        // 넘겨 YouTube 쪽 변경에 좀 더 안전하게 대응한다(PATH 탐색에 기대지 않음).
+        var arguments = [
+            "--no-playlist", "--no-warnings", "--quiet",
+            "-f", ytdlpVideoAudioSelector,
+            "--merge-output-format", "mp4",
+            "--ffmpeg-location", ffmpegDir,
+            "--retries", "5", "--fragment-retries", "5", "--socket-timeout", "20"
+        ]
+        if let deno = denoPath() {
+            arguments += ["--js-runtimes", "deno:\(deno)"]
+        }
+        arguments += [
+            "-o", tempURL.path,
+            "--print", "after_move:%(title)j",
+            "--", source
+        ]
+
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 // 완료 후(병합 파일이 최종 위치로 옮겨진 뒤) 제목 한 줄을 출력.
-                let result = runYTDLP(ytdlpPath: ytdlp, arguments: [
-                    "--no-playlist", "--no-warnings", "--quiet",
-                    "-f", ytdlpVideoAudioSelector,
-                    "--merge-output-format", "mp4",
-                    "--ffmpeg-location", ffmpegDir,
-                    "--retries", "5", "--fragment-retries", "5", "--socket-timeout", "20",
-                    "-o", tempURL.path,
-                    "--print", "after_move:%(title)j",
-                    "--", source
-                ], source: source, timeout: 1800)
+                let result = runYTDLP(ytdlpPath: ytdlp, arguments: arguments, source: source, timeout: 1800)
 
                 guard result.exitCode == 0, FileManager.default.fileExists(atPath: tempURL.path) else {
                     try? FileManager.default.removeItem(at: tempURL)
