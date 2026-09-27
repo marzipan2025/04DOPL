@@ -1041,10 +1041,13 @@ class VideoSampler: ObservableObject {
         return webResolveHosts.contains { host == $0 || host.hasSuffix("." + $0) }
     }
 
-    /// 예전 resolve_direct_url.command 의 포맷 우선순위를 한 번의 호출로 재현.
-    /// AVPlayer 가 바로 재생할 수 있는 음성+영상 단일 파일(progressive mp4)을 우선하고,
-    /// 없으면 단일 포맷(b/best, HLS 포함)으로 폴백.
+    /// AVPlayer 가 바로 재생할 수 있는 음성+영상 단일 포맷을 고른다.
+    /// HLS(m3u8)를 우선 — YouTube 의 https(progressive) 포맷은 GVS PO Token 없이는
+    /// googlevideo 가 403 을 돌려주는 경우가 많지만(android_vr 등) HLS 는 토큰이 필수가 아니다.
+    /// HLS 가 없으면 예전 resolve_direct_url.command 의 우선순위로 폴백.
     nonisolated private static let ytdlpFormatSelector = [
+        "best[protocol^=m3u8][vcodec^=avc1][acodec!=none]",
+        "best[protocol^=m3u8][vcodec!=none][acodec!=none]",
         "best[ext=mp4][vcodec!=none][acodec!=none][protocol=https]",
         "best[ext=mp4][vcodec!=none][acodec!=none][protocol=http]",
         "18",
