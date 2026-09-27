@@ -81,7 +81,9 @@ class VideoSampler: ObservableObject {
     @Published var videoSize: CGSize = .zero
     @Published var isPlaying = false
     @Published var urlLoadError: String?     // URL 또는 ffmpeg 처리 실패 등
-    @Published var isLoadingMedia: Bool = false   // remux 진행 중 표시용
+    @Published var isLoadingMedia: Bool = false   // remux / 웹 URL 해석 진행 중 표시용
+    /// yt-dlp 로 해석한 웹 페이지 URL 의 제목. ContentView 가 최근 항목 제목 보강에 사용.
+    @Published var resolvedURLTitle: ResolvedURLTitle?
     @Published var isStaticContent: Bool = false  // 이미지 모드 — 플레이 기능 비활성화
     @Published var isAudioMode: Bool = false      // 오디오 전용 모드 — 영상 없이 시각화
     @Published var backgroundDotAlpha: Double = 0.40
@@ -91,6 +93,8 @@ class VideoSampler: ObservableObject {
     private var lastVolume: Float = 1.0
 
     private var activeRemuxTempURL: URL?
+    /// open 요청마다 증가. 비동기 URL 해석 결과가 늦게 도착했을 때 무시하기 위한 토큰.
+    private var openGeneration: UInt64 = 0
     // 오디오 시각화용 사전 분석 데이터
     private var audioEnergyFrames: [AudioEnergyFrame] = []
     private var audioAnalysisRate: Double = 30.0
@@ -221,6 +225,8 @@ class VideoSampler: ObservableObject {
     /// 외부 진입점. AVFoundation이 지원 안 하는 컨테이너(mkv/webm/avi 등)는 ffmpeg로 remux 후 재생.
     /// 이미지 확장자면 정적 이미지 모드로 로드 (플레이 관련 기능은 비활성).
     func open(url: URL) {
+        openGeneration &+= 1
+        isLoadingMedia = false
         startTimerIfNeeded()
         // 이미지 파일은 별도 경로로 처리
         if url.isFileURL && Self.isImageFile(url: url) {
@@ -969,7 +975,14 @@ class VideoSampler: ObservableObject {
         case failure(String)
     }
 
-    /// URL 문자열로 열기. 직접 재생 가능한 URL만 연다.
+    struct ResolvedURLTitle: Equatable {
+        let sourceURL: String
+        let title: String
+    }
+
+    /// URL 문자열로 열기.
+    /// YouTube 등 웹 페이지 URL 은 yt-dlp 로 직접 재생 가능한 스트림 URL 을 얻어 연다.
+    /// 그 외에는 직접 재생 가능한 URL 로 간주하고 바로 연다.
     func openURL(_ urlString: String) {
         startTimerIfNeeded()
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -978,7 +991,160 @@ class VideoSampler: ObservableObject {
             return
         }
 
-        open(url: url)
+        guard Self.needsWebResolve(url: url) else {
+            open(url: url)
+            return
+        }
+
+        // 이전 미디어를 즉시 정리 — 해석 중 재생 위치 복원이 이전 플레이어를 잡지 않도록.
+        cleanup()
+        if let prev = activeRemuxTempURL {
+            try? FileManager.default.removeItem(at: prev)
+            activeRemuxTempURL = nil
+        }
+        openGeneration &+= 1
+        let generation = openGeneration
+        isLoadingMedia = true
+        Task.detached { [weak self] in
+            let outcome = await Self.resolveWithYTDLP(source: trimmed)
+            await MainActor.run { [weak self] in
+                guard let self, self.openGeneration == generation else { return }
+                self.isLoadingMedia = false
+                switch outcome {
+                case .success(let direct, let title):
+                    if let title {
+                        self.resolvedURLTitle = ResolvedURLTitle(sourceURL: trimmed, title: title)
+                    }
+                    self.open(url: direct)
+                case .failure(let message):
+                    self.urlLoadError = message
+                }
+            }
+        }
+    }
+
+    // MARK: - Web URL 해석 (yt-dlp)
+
+    enum WebResolveOutcome {
+        case success(URL, title: String?)
+        case failure(String)
+    }
+
+    private static let webResolveHosts: [String] = [
+        "youtube.com", "youtu.be", "youtube-nocookie.com"
+    ]
+
+    /// yt-dlp 해석이 필요한 페이지 URL 인지. (YouTube 계열 호스트)
+    static func needsWebResolve(url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              let host = url.host?.lowercased() else { return false }
+        return webResolveHosts.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// 예전 resolve_direct_url.command 의 포맷 우선순위를 한 번의 호출로 재현.
+    /// AVPlayer 가 바로 재생할 수 있는 음성+영상 단일 파일(progressive mp4)을 우선하고,
+    /// 없으면 단일 포맷(b/best, HLS 포함)으로 폴백.
+    nonisolated private static let ytdlpFormatSelector = [
+        "best[ext=mp4][vcodec!=none][acodec!=none][protocol=https]",
+        "best[ext=mp4][vcodec!=none][acodec!=none][protocol=http]",
+        "18",
+        "best[ext=mp4][vcodec!=none][acodec!=none]",
+        "b",
+        "best"
+    ].joined(separator: "/")
+
+    nonisolated private static func ytdlpPath() -> String? {
+        var candidates: [String] = []
+        if let bundled = Bundle.main.url(forAuxiliaryExecutable: "yt-dlp") {
+            candidates.append(bundled.path)
+        }
+        candidates += [
+            "/opt/homebrew/bin/yt-dlp",
+            "/usr/local/bin/yt-dlp",
+            "/opt/local/bin/yt-dlp",
+            NSHomeDirectory() + "/.local/bin/yt-dlp"
+        ]
+        return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
+    }
+
+    nonisolated private static func resolveWithYTDLP(source: String) async -> WebResolveOutcome {
+        guard let ytdlp = ytdlpPath() else {
+            return .failure("yt-dlp가 설치되어 있지 않습니다.\n터미널에서 실행하세요:\n  brew install yt-dlp")
+        }
+
+        return await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: ytdlp)
+                // 1행: JSON 인코딩된 제목, 2행~: 선택된 포맷의 URL.
+                task.arguments = [
+                    "--no-playlist", "--no-warnings", "--quiet",
+                    "-f", ytdlpFormatSelector,
+                    "--print", "%(title)j",
+                    "--print", "urls",
+                    "--", source
+                ]
+                // GUI 앱은 PATH 가 최소한이라 Homebrew 경로를 보강.
+                // (yt-dlp 가 YouTube 해석에 쓰는 JS 런타임(deno 등)을 찾을 수 있도록)
+                var env = ProcessInfo.processInfo.environment
+                let extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"]
+                env["PATH"] = (extraPaths + [env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"])
+                    .joined(separator: ":")
+                task.environment = env
+
+                let outPipe = Pipe()
+                let errPipe = Pipe()
+                task.standardOutput = outPipe
+                task.standardError = errPipe
+
+                do {
+                    try task.run()
+                } catch {
+                    continuation.resume(returning: .failure("yt-dlp를 실행할 수 없습니다."))
+                    return
+                }
+
+                // 네트워크 정체 대비 타임아웃.
+                let timeout = DispatchWorkItem { if task.isRunning { task.terminate() } }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: timeout)
+
+                // 파이프 버퍼가 차서 멈추지 않도록 종료 대기 전에 먼저 읽는다.
+                let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                task.waitUntilExit()
+                timeout.cancel()
+
+                let lines = (String(data: outData, encoding: .utf8) ?? "")
+                    .split(whereSeparator: \.isNewline)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+
+                var title: String?
+                if let first = lines.first,
+                   let data = first.data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode(String.self, from: data) {
+                    let t = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+                    title = t.isEmpty ? nil : t
+                }
+
+                guard task.terminationStatus == 0,
+                      let direct = lines.dropFirst()
+                        .compactMap({ URL(string: $0) })
+                        .first(where: { $0.scheme?.hasPrefix("http") == true }) else {
+                    let err = (String(data: errData, encoding: .utf8) ?? "")
+                        .split(whereSeparator: \.isNewline)
+                        .last
+                        .map(String.init)?
+                        .trimmingCharacters(in: .whitespaces) ?? ""
+                    var message = "직접 재생 가능한 URL을 만들지 못했습니다."
+                    if !err.isEmpty { message += "\n\n" + err }
+                    continuation.resume(returning: .failure(message))
+                    return
+                }
+
+                continuation.resume(returning: .success(direct, title: title))
+            }
+        }
     }
 
     // MARK: - Controls
