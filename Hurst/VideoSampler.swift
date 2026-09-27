@@ -227,8 +227,7 @@ class VideoSampler: ObservableObject {
 
     /// 외부 진입점. AVFoundation이 지원 안 하는 컨테이너(mkv/webm/avi 등)는 ffmpeg로 remux 후 재생.
     /// 이미지 확장자면 정적 이미지 모드로 로드 (플레이 관련 기능은 비활성).
-    /// httpHeaders: 원격 URL 요청에 붙일 헤더 (yt-dlp 가 알려준 User-Agent 등).
-    func open(url: URL, httpHeaders: [String: String]? = nil) {
+    func open(url: URL) {
         openGeneration &+= 1
         isLoadingMedia = false
         startTimerIfNeeded()
@@ -263,17 +262,13 @@ class VideoSampler: ObservableObject {
                 }
             }
         } else {
-            loadPlayable(url: url, httpHeaders: httpHeaders)
+            loadPlayable(url: url)
         }
     }
 
     /// AVPlayer가 바로 재생 가능한 URL을 로드
-    private func loadPlayable(url: URL, httpHeaders: [String: String]? = nil) {
-        var assetOptions: [String: Any] = [:]
-        if let httpHeaders, !httpHeaders.isEmpty, !url.isFileURL {
-            assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = httpHeaders
-        }
-        let asset = AVURLAsset(url: url, options: assetOptions)
+    private func loadPlayable(url: URL) {
+        let asset = AVURLAsset(url: url)
         let generation = openGeneration
         let item = AVPlayerItem(asset: asset)
 
@@ -842,9 +837,9 @@ class VideoSampler: ObservableObject {
         unsupportedExtensions.contains(url.pathExtension.lowercased())
     }
 
-    nonisolated private static func remuxToMP4(source: URL) async -> ResolveOutcome {
+    /// 번들 내 임베드된 ffmpeg 우선 탐색, 없으면 Homebrew 등 알려진 경로.
+    nonisolated private static func ffmpegPath() -> String? {
         var candidates: [String] = []
-        // 번들 내 임베드된 ffmpeg 우선 탐색
         if let bundled = Bundle.main.url(forAuxiliaryExecutable: "ffmpeg") {
             candidates.append(bundled.path)
         }
@@ -853,7 +848,11 @@ class VideoSampler: ObservableObject {
             "/usr/local/bin/ffmpeg",
             "/opt/local/bin/ffmpeg"
         ]
-        guard let ffmpegPath = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
+        return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
+    }
+
+    nonisolated private static func remuxToMP4(source: URL) async -> ResolveOutcome {
+        guard let ffmpegPath = ffmpegPath() else {
             return .failure("ffmpeg이 설치되어 있지 않습니다.\n터미널에서 실행하세요:\n  brew install ffmpeg")
         }
 
@@ -1022,16 +1021,19 @@ class VideoSampler: ObservableObject {
         let generation = openGeneration
         isLoadingMedia = true
         Task.detached { [weak self] in
-            let outcome = await Self.resolveWithYTDLP(source: trimmed)
+            let outcome = await Self.resolveYouTubeToLocalFile(source: trimmed)
             await MainActor.run { [weak self] in
                 guard let self, self.openGeneration == generation else { return }
                 self.isLoadingMedia = false
                 switch outcome {
-                case .success(let direct, let title, let headers):
+                case .success(let localURL, let title):
                     if let title {
                         self.resolvedURLTitle = ResolvedURLTitle(sourceURL: trimmed, title: title)
                     }
-                    self.open(url: direct, httpHeaders: headers)
+                    // open(url:)이 내부에서 기존 activeRemuxTempURL을 먼저 정리하므로,
+                    // 지금 만든 파일은 그 호출이 끝난 다음에 등록해야 곧바로 지워지지 않는다.
+                    self.open(url: localURL)
+                    self.activeRemuxTempURL = localURL
                 case .failure(let message):
                     self.urlLoadError = message
                 }
@@ -1039,10 +1041,10 @@ class VideoSampler: ObservableObject {
         }
     }
 
-    // MARK: - Web URL 해석 (yt-dlp)
+    // MARK: - Web URL 해석 (yt-dlp + ffmpeg)
 
     enum WebResolveOutcome {
-        case success(URL, title: String?, headers: [String: String])
+        case success(URL, title: String?)
         case failure(String)
     }
 
@@ -1057,20 +1059,14 @@ class VideoSampler: ObservableObject {
         return webResolveHosts.contains { host == $0 || host.hasSuffix("." + $0) }
     }
 
-    /// AVPlayer 가 바로 재생할 수 있는 음성+영상 단일 포맷을 고른다.
-    /// HLS(m3u8)를 우선 — YouTube 의 https(progressive) 포맷은 GVS PO Token 없이는
-    /// googlevideo 가 403 을 돌려주는 경우가 많지만(android_vr 등) HLS 는 토큰이 필수가 아니다.
-    /// HLS 가 없으면 예전 resolve_direct_url.command 의 우선순위로 폴백.
-    nonisolated private static let ytdlpFormatSelector = [
-        "best[protocol^=m3u8][vcodec^=avc1][acodec!=none]",
-        "best[protocol^=m3u8][vcodec!=none][acodec!=none]",
-        "best[ext=mp4][vcodec!=none][acodec!=none][protocol=https]",
-        "best[ext=mp4][vcodec!=none][acodec!=none][protocol=http]",
-        "18",
-        "best[ext=mp4][vcodec!=none][acodec!=none]",
-        "b",
-        "best"
-    ].joined(separator: "/")
+    /// video-only + audio-only 를 따로 골라 AVFoundation이 그대로 디코드하는 코덱(H.264 + AAC)만
+    /// 받는다. YouTube 는 이미 하나로 합쳐진 스트림(예: 과거의 itag 18)을 더 이상 안정적으로 주지
+    /// 않는다 — 주는 시점도, PO Token 요구 여부도 들쑥날쑥하다. video-only(avc1)/audio-only(mp4a)
+    /// DASH 스트림은 항상 존재해서 그 둘을 yt-dlp 로 내려받아(자체 재시도/타임아웃 포함) 로컬에서
+    /// 합친다 — video/audio URL을 직접 ffmpeg 에 물려 스트리밍하는 방식은 googlevideo 쪽 연결이
+    /// 끊김 신호 없이 멈추는 경우가 있어(스톨) yt-dlp 자체 다운로더를 쓴다.
+    nonisolated private static let ytdlpVideoAudioSelector =
+        "bestvideo[vcodec^=avc1]+bestaudio[acodec^=mp4a]/best[vcodec^=avc1][acodec^=mp4a]"
 
     nonisolated private static func ytdlpPath() -> String? {
         var candidates: [String] = []
@@ -1086,98 +1082,104 @@ class VideoSampler: ObservableObject {
         return candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
     }
 
-    nonisolated private static func resolveWithYTDLP(source: String) async -> WebResolveOutcome {
+    /// yt-dlp를 실행하고 exit code / stdout / stderr을 돌려준다.
+    nonisolated private static func runYTDLP(ytdlpPath: String, arguments: [String], source: String, timeout: TimeInterval = 60) -> (exitCode: Int32, stdout: String, stderr: String) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: ytdlpPath)
+        task.arguments = arguments
+        // GUI 앱은 PATH 가 최소한이라 Homebrew 경로를 보강.
+        // (yt-dlp 가 YouTube 해석에 쓰는 JS 런타임(deno 등)을 찾을 수 있도록)
+        var env = ProcessInfo.processInfo.environment
+        let extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"]
+        env["PATH"] = (extraPaths + [env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"])
+            .joined(separator: ":")
+        task.environment = env
+
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        task.standardOutput = outPipe
+        task.standardError = errPipe
+
+        let startedAt = Date()
+        urlLog.info("yt-dlp start: \(ytdlpPath, privacy: .public) \(source, privacy: .public)")
+        do {
+            try task.run()
+        } catch {
+            return (-1, "", "")
+        }
+
+        // 네트워크 정체 대비 타임아웃.
+        let timeoutItem = DispatchWorkItem { if task.isRunning { task.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutItem)
+
+        // 파이프 버퍼가 차서 멈추지 않도록 종료 대기 전에 먼저 읽는다.
+        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+        let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        timeoutItem.cancel()
+
+        let stdout = String(data: outData, encoding: .utf8) ?? ""
+        let stderr = String(data: errData, encoding: .utf8) ?? ""
+        urlLog.info("yt-dlp exit \(task.terminationStatus) in \(Date().timeIntervalSince(startedAt), format: .fixed(precision: 1))s")
+        if !stderr.isEmpty {
+            urlLog.info("yt-dlp stderr: \(stderr, privacy: .public)")
+        }
+        return (task.terminationStatus, stdout, stderr)
+    }
+
+    /// yt-dlp로 video-only(avc1) + audio-only(mp4a) 스트림을 내려받아 로컬 mp4 파일 하나로 합친다.
+    /// yt-dlp 자체 다운로더는 재시도/소켓 타임아웃을 갖고 있어, video/audio URL을 직접 ffmpeg에
+    /// 물려 스트리밍하는 것보다 googlevideo 쪽 연결이 응답 없이 멈추는 상황에 훨씬 강하다.
+    /// 병합은 --merge-output-format으로 yt-dlp가 내장 ffmpeg 호출을 통해 직접 수행한다.
+    nonisolated private static func resolveYouTubeToLocalFile(source: String) async -> WebResolveOutcome {
         guard let ytdlp = ytdlpPath() else {
             return .failure("yt-dlp가 설치되어 있지 않습니다.\n터미널에서 실행하세요:\n  brew install yt-dlp")
         }
+        guard let ffmpeg = ffmpegPath() else {
+            return .failure("ffmpeg이 설치되어 있지 않습니다.\n터미널에서 실행하세요:\n  brew install ffmpeg")
+        }
+        let ffmpegDir = (ffmpeg as NSString).deletingLastPathComponent
+
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("hurst-ytdl-\(UUID().uuidString).mp4")
 
         return await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                let task = Process()
-                task.executableURL = URL(fileURLWithPath: ytdlp)
-                // 1행: JSON 인코딩된 제목, 2행: JSON 요청 헤더, 3행~: 선택된 포맷의 URL.
-                task.arguments = [
+                // 완료 후(병합 파일이 최종 위치로 옮겨진 뒤) 제목 한 줄을 출력.
+                let result = runYTDLP(ytdlpPath: ytdlp, arguments: [
                     "--no-playlist", "--no-warnings", "--quiet",
-                    "-f", ytdlpFormatSelector,
-                    "--print", "%(title)j",
-                    "--print", "%(http_headers)j",
-                    "--print", "urls",
+                    "-f", ytdlpVideoAudioSelector,
+                    "--merge-output-format", "mp4",
+                    "--ffmpeg-location", ffmpegDir,
+                    "--retries", "5", "--fragment-retries", "5", "--socket-timeout", "20",
+                    "-o", tempURL.path,
+                    "--print", "after_move:%(title)j",
                     "--", source
-                ]
-                // GUI 앱은 PATH 가 최소한이라 Homebrew 경로를 보강.
-                // (yt-dlp 가 YouTube 해석에 쓰는 JS 런타임(deno 등)을 찾을 수 있도록)
-                var env = ProcessInfo.processInfo.environment
-                let extraPaths = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"]
-                env["PATH"] = (extraPaths + [env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"])
-                    .joined(separator: ":")
-                task.environment = env
+                ], source: source, timeout: 1800)
 
-                let outPipe = Pipe()
-                let errPipe = Pipe()
-                task.standardOutput = outPipe
-                task.standardError = errPipe
-
-                let startedAt = Date()
-                urlLog.info("yt-dlp start: \(ytdlp, privacy: .public) \(source, privacy: .public)")
-                do {
-                    try task.run()
-                } catch {
-                    continuation.resume(returning: .failure("yt-dlp를 실행할 수 없습니다."))
-                    return
-                }
-
-                // 네트워크 정체 대비 타임아웃.
-                let timeout = DispatchWorkItem { if task.isRunning { task.terminate() } }
-                DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: timeout)
-
-                // 파이프 버퍼가 차서 멈추지 않도록 종료 대기 전에 먼저 읽는다.
-                let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-                let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
-                task.waitUntilExit()
-                timeout.cancel()
-                let stderrText = String(data: errData, encoding: .utf8) ?? ""
-                urlLog.info("yt-dlp exit \(task.terminationStatus) in \(Date().timeIntervalSince(startedAt), format: .fixed(precision: 1))s")
-                if !stderrText.isEmpty {
-                    urlLog.info("yt-dlp stderr: \(stderrText, privacy: .public)")
-                }
-
-                let lines = (String(data: outData, encoding: .utf8) ?? "")
-                    .split(whereSeparator: \.isNewline)
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty }
-
-                var title: String?
-                if let first = lines.first,
-                   let data = first.data(using: .utf8),
-                   let decoded = try? JSONDecoder().decode(String.self, from: data) {
-                    let t = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
-                    title = t.isEmpty ? nil : t
-                }
-
-                var headers: [String: String] = [:]
-                if lines.count > 1,
-                   let data = lines[1].data(using: .utf8),
-                   let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
-                    headers = decoded
-                }
-
-                guard task.terminationStatus == 0,
-                      let direct = lines.dropFirst(2)
-                        .compactMap({ URL(string: $0) })
-                        .first(where: { $0.scheme?.hasPrefix("http") == true }) else {
-                    let err = stderrText
+                guard result.exitCode == 0, FileManager.default.fileExists(atPath: tempURL.path) else {
+                    try? FileManager.default.removeItem(at: tempURL)
+                    let err = result.stderr
                         .split(whereSeparator: \.isNewline)
                         .last
                         .map(String.init)?
                         .trimmingCharacters(in: .whitespaces) ?? ""
-                    var message = "직접 재생 가능한 URL을 만들지 못했습니다."
+                    var message = "영상을 내려받는 데 실패했습니다."
                     if !err.isEmpty { message += "\n\n" + err }
                     continuation.resume(returning: .failure(message))
                     return
                 }
 
-                urlLog.info("yt-dlp resolved: \(direct.absoluteString, privacy: .public) headers: \(headers.description, privacy: .public)")
-                continuation.resume(returning: .success(direct, title: title, headers: headers))
+                var title: String?
+                if let last = result.stdout.split(whereSeparator: \.isNewline).last,
+                   let data = String(last).trimmingCharacters(in: .whitespaces).data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode(String.self, from: data) {
+                    let t = decoded.trimmingCharacters(in: .whitespacesAndNewlines)
+                    title = t.isEmpty ? nil : t
+                }
+
+                urlLog.info("yt-dlp downloaded+merged: \(tempURL.path, privacy: .public)")
+                continuation.resume(returning: .success(tempURL, title: title))
             }
         }
     }
