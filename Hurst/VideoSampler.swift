@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import os
 import Accelerate
 import CoreImage
 
@@ -7,6 +8,8 @@ import CoreImage
 struct AudioEnergyFrame {
     let rms: Float       // Overall RMS level (0–1)
 }
+
+private let urlLog = Logger(subsystem: "com.hurst.app", category: "url")
 
 @MainActor
 class VideoSampler: ObservableObject {
@@ -224,7 +227,8 @@ class VideoSampler: ObservableObject {
 
     /// 외부 진입점. AVFoundation이 지원 안 하는 컨테이너(mkv/webm/avi 등)는 ffmpeg로 remux 후 재생.
     /// 이미지 확장자면 정적 이미지 모드로 로드 (플레이 관련 기능은 비활성).
-    func open(url: URL) {
+    /// httpHeaders: 원격 URL 요청에 붙일 헤더 (yt-dlp 가 알려준 User-Agent 등).
+    func open(url: URL, httpHeaders: [String: String]? = nil) {
         openGeneration &+= 1
         isLoadingMedia = false
         startTimerIfNeeded()
@@ -259,13 +263,18 @@ class VideoSampler: ObservableObject {
                 }
             }
         } else {
-            loadPlayable(url: url)
+            loadPlayable(url: url, httpHeaders: httpHeaders)
         }
     }
 
     /// AVPlayer가 바로 재생 가능한 URL을 로드
-    private func loadPlayable(url: URL) {
-        let asset = AVURLAsset(url: url)
+    private func loadPlayable(url: URL, httpHeaders: [String: String]? = nil) {
+        var assetOptions: [String: Any] = [:]
+        if let httpHeaders, !httpHeaders.isEmpty, !url.isFileURL {
+            assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = httpHeaders
+        }
+        let asset = AVURLAsset(url: url, options: assetOptions)
+        let generation = openGeneration
         let item = AVPlayerItem(asset: asset)
 
         let outputSettings: [String: Any] = [
@@ -345,6 +354,13 @@ class VideoSampler: ObservableObject {
                 }
             } catch {
                 print("Failed to load video track: \(error)")
+                // 원격 URL 은 403 등으로 열리지 않으면 조용히 멈춰 있지 말고 알린다.
+                if !url.isFileURL {
+                    guard self.openGeneration == generation else { return }
+                    urlLog.error("AVPlayer failed to open \(url.absoluteString, privacy: .public): \(String(describing: error), privacy: .public)")
+                    self.urlLoadError = "영상을 열 수 없습니다.\n\n\(error.localizedDescription)"
+                    return
+                }
                 self.player?.play()
                 self.isPlaying = true
             }
@@ -1011,11 +1027,11 @@ class VideoSampler: ObservableObject {
                 guard let self, self.openGeneration == generation else { return }
                 self.isLoadingMedia = false
                 switch outcome {
-                case .success(let direct, let title):
+                case .success(let direct, let title, let headers):
                     if let title {
                         self.resolvedURLTitle = ResolvedURLTitle(sourceURL: trimmed, title: title)
                     }
-                    self.open(url: direct)
+                    self.open(url: direct, httpHeaders: headers)
                 case .failure(let message):
                     self.urlLoadError = message
                 }
@@ -1026,7 +1042,7 @@ class VideoSampler: ObservableObject {
     // MARK: - Web URL 해석 (yt-dlp)
 
     enum WebResolveOutcome {
-        case success(URL, title: String?)
+        case success(URL, title: String?, headers: [String: String])
         case failure(String)
     }
 
@@ -1079,11 +1095,12 @@ class VideoSampler: ObservableObject {
             DispatchQueue.global(qos: .userInitiated).async {
                 let task = Process()
                 task.executableURL = URL(fileURLWithPath: ytdlp)
-                // 1행: JSON 인코딩된 제목, 2행~: 선택된 포맷의 URL.
+                // 1행: JSON 인코딩된 제목, 2행: JSON 요청 헤더, 3행~: 선택된 포맷의 URL.
                 task.arguments = [
                     "--no-playlist", "--no-warnings", "--quiet",
                     "-f", ytdlpFormatSelector,
                     "--print", "%(title)j",
+                    "--print", "%(http_headers)j",
                     "--print", "urls",
                     "--", source
                 ]
@@ -1100,6 +1117,8 @@ class VideoSampler: ObservableObject {
                 task.standardOutput = outPipe
                 task.standardError = errPipe
 
+                let startedAt = Date()
+                urlLog.info("yt-dlp start: \(ytdlp, privacy: .public) \(source, privacy: .public)")
                 do {
                     try task.run()
                 } catch {
@@ -1116,6 +1135,11 @@ class VideoSampler: ObservableObject {
                 let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
                 task.waitUntilExit()
                 timeout.cancel()
+                let stderrText = String(data: errData, encoding: .utf8) ?? ""
+                urlLog.info("yt-dlp exit \(task.terminationStatus) in \(Date().timeIntervalSince(startedAt), format: .fixed(precision: 1))s")
+                if !stderrText.isEmpty {
+                    urlLog.info("yt-dlp stderr: \(stderrText, privacy: .public)")
+                }
 
                 let lines = (String(data: outData, encoding: .utf8) ?? "")
                     .split(whereSeparator: \.isNewline)
@@ -1130,11 +1154,18 @@ class VideoSampler: ObservableObject {
                     title = t.isEmpty ? nil : t
                 }
 
+                var headers: [String: String] = [:]
+                if lines.count > 1,
+                   let data = lines[1].data(using: .utf8),
+                   let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
+                    headers = decoded
+                }
+
                 guard task.terminationStatus == 0,
-                      let direct = lines.dropFirst()
+                      let direct = lines.dropFirst(2)
                         .compactMap({ URL(string: $0) })
                         .first(where: { $0.scheme?.hasPrefix("http") == true }) else {
-                    let err = (String(data: errData, encoding: .utf8) ?? "")
+                    let err = stderrText
                         .split(whereSeparator: \.isNewline)
                         .last
                         .map(String.init)?
@@ -1145,7 +1176,8 @@ class VideoSampler: ObservableObject {
                     return
                 }
 
-                continuation.resume(returning: .success(direct, title: title))
+                urlLog.info("yt-dlp resolved: \(direct.absoluteString, privacy: .public) headers: \(headers.description, privacy: .public)")
+                continuation.resume(returning: .success(direct, title: title, headers: headers))
             }
         }
     }
