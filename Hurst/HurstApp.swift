@@ -228,14 +228,27 @@ struct HurstApp: App {
     @StateObject private var recents = RecentsStore()
 
     var body: some Scene {
-        WindowGroup {
+        // AppDelegate 가 재생 창을 새로 띄워야 할 때 쓴다 (presentPlaybackWindow 참고).
+        let _ = { AppDelegate.openPlayerWindow = openWindow }()
+
+        // **WindowGroup 이 아니라 Window** — 재생 창은 구조적으로 하나만 존재한다.
+        //
+        // WindowGroup 이면 Finder 에서 파일을 열 때마다 SwiftUI 가 창을 새로 만든다.
+        // 이 앱은 창이 여럿인 걸 감당하지 못한다: 키 입력을 받는 NSEvent 로컬 모니터가
+        // 창이 아니라 **앱 단위**라 창마다 달린 모니터가 모든 키를 다 받고, 파일 열기도
+        // 알림 방송이라 모든 창이 같은 영상으로 갈아타며 각자 remux(ffmpeg)를 돌린다.
+        Window("04DOPL", id: "player-window") {
+            // .onOpenURL 을 달면 안 된다. 그걸 다는 순간 이 씬이 "파일 열기를 내가
+            // 처리한다"고 선언하는 셈이라, Finder 에서 파일을 열 때마다 SwiftUI 가 창을
+            // 하나씩 새로 만든다. 파일 열기와 04dopl:// 스킴은 AppDelegate.application(_:open:)
+            // 이 받아 알림으로 뿌리므로, 열려 있던 창이 그대로 새 영상으로 갈아탄다.
             ContentView()
                 .environmentObject(recents)
-                .onOpenURL { incomingURL in
-                    AppDelegate.handleIncomingURLs([incomingURL])
-                }
         }
         .windowStyle(.hiddenTitleBar)
+        // 이게 없으면 이전 실행의 "창 닫힘" 상태가 복원되어 창이 하나도 없는 채로 뜰 수 있다.
+        .defaultLaunchBehavior(.presented)
+        .restorationBehavior(.disabled)
 
         Window("Settings", id: "settings-window") {
             SettingsWindowView()
@@ -294,6 +307,22 @@ struct HurstApp: App {
                         Button("Clear History") { recents.clear() }
                     }
                 }
+
+                Divider()
+
+                // 재생 창은 타이틀바를 숨겨 쓰기 때문에 SwiftUI 가 File > Close 를 붙여주지
+                // 않는다. keyWindow 우선 — 설정 창이 앞이면 설정 창만 닫는다.
+                Button("Close Window") {
+                    let target = NSApp.keyWindow ?? NSApp.mainWindow
+                    // 재생 창은 하나뿐이라 닫는 것 = 앱 종료.
+                    // (마지막 창이 닫혀도 앱이 살아남게 해 뒀으므로 직접 종료시켜야 한다.)
+                    if let target, AppDelegate.isSettingsWindow(target) {
+                        target.performClose(nil)
+                    } else {
+                        NSApp.terminate(nil)
+                    }
+                }
+                .keyboardShortcut("w", modifiers: .command)
             }
 
             // macOS 표준 설정 메뉴 위치 (App Menu)에 배치
@@ -345,6 +374,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     static func isPlaybackWindow(_ window: NSWindow) -> Bool {
         !isSettingsWindow(window) && window.contentView != nil
+    }
+
+    /// HurstApp 이 넘겨 주는 openWindow. 재생 창이 아예 없을 때 띄우는 용도.
+    @MainActor static var openPlayerWindow: OpenWindowAction?
+
+    /// 유일한 재생 창.
+    static weak var primaryPlaybackWindow: NSWindow?
+
+    /// 재생 창을 다시 화면에 올린다.
+    ///
+    /// Window 씬은 실행 중에 파일 열기 요청을 받으면 창을 화면 밖으로 내려버린다
+    /// (내용은 멀쩡히 새 영상으로 갈아탄 상태다). 그대로 두면 창이 사라진 것처럼 보인다.
+    @MainActor
+    static func presentPlaybackWindow() {
+        let window = primaryPlaybackWindow
+            ?? NSApplication.shared.windows.first { isPlaybackWindow($0) && !$0.title.isEmpty }
+        guard let window else {
+            // 04dopl:// 로 콜드 기동하면 SwiftUI 가 재생 창을 아예 만들지 않는다
+            // (파일 열기·일반 실행과 달리). 창이 없으면 씬에 직접 띄우라고 한다.
+            openPlayerWindow?(id: "player-window")
+            return
+        }
+        primaryPlaybackWindow = window
+        window.makeKeyAndOrderFront(nil)
     }
 
     @MainActor
@@ -430,10 +483,33 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return true
     }
 
+    /// 04dopl:// 스킴은 GURL Apple 이벤트를 직접 받는다.
+    ///
+    /// 재생 씬이 Window 가 되면서 .onOpenURL 을 뗐더니, SwiftUI 가 GURL 이벤트를 가로채
+    /// application(_:open:) 까지 넘기지 않고 창만 내려 버린다(창 0개, 재생 그대로).
+    /// 파일 열기(odoc)는 그대로 delegate 로 오므로 GURL 만 여기서 처리한다.
+    /// applicationDidFinishLaunching 보다 먼저 걸어야 콜드 기동 때의 이벤트도 받는다.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleGetURLEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kInternetEventClass),
+            andEventID: AEEventID(kAEGetURL)
+        )
+    }
+
+    @objc private func handleGetURLEvent(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
+        // "04dopl" 처럼 숫자로 시작하는 스킴은 URL(string:) 이 nil 을 준다. CFURL 은 받아준다.
+        guard let string = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let url = CFURLCreateWithString(nil, string as CFString, nil) as URL? else { return }
+        Self.handleIncomingURLs([url])
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         DispatchQueue.main.async {
             guard let window = NSApplication.shared.windows.first(where: Self.isPlaybackWindow) else { return }
             window.delegate = self
+            Self.primaryPlaybackWindow = window
             Self.applyStyle(window)
             // 매 실행마다 480x320으로 시작. 창은 화면 중앙에 배치.
             let size = CGSize(width: 480, height: 320)
@@ -570,6 +646,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     static func applyStyle(_ window: NSWindow) {
         guard isPlaybackWindow(window) else { return }
         // .titled를 유지해야 키보드(엔터, 스페이스바 등) 이벤트와 키 윈도우 포커스가 정상 작동합니다.
+        // .closable 은 넣지 않는다. 넣으면 AppKit 이 File 메뉴에 Close / Close All 을
+        // 끼워 넣는데, 그것들은 창을 내리기만 해서 창 없이 앱만 살아 있는 상태가 된다.
+        // ⌘W 는 Close Window 명령이 직접 종료시키므로 .closable 이 필요 없다.
         var newStyleMask: NSWindow.StyleMask = [.titled, .fullSizeContentView, .resizable]
         if window.styleMask.contains(.fullScreen) {
             newStyleMask.insert(.fullScreen)
@@ -614,9 +693,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     static func injectedMediaURL(from incomingURL: URL) -> ExternalMediaOpenRequest? {
-        guard incomingURL.scheme?.lowercased() == "04dopl" else { return nil }
-        guard let components = URLComponents(url: incomingURL, resolvingAgainstBaseURL: false),
-              let value = components.queryItems?.first(where: { $0.name == "url" })?.value?
+        // "04dopl" 은 숫자로 시작해 RFC 상 올바른 스킴이 아니라서, Foundation 이
+        // scheme 도 URLComponents 도 nil 로 준다. 문자열에서 쿼리만 떼어 파싱한다.
+        let raw = incomingURL.absoluteString
+        guard raw.lowercased().hasPrefix("04dopl:"),
+              let queryStart = raw.firstIndex(of: "?") else { return nil }
+        var components = URLComponents()
+        components.percentEncodedQuery = String(raw[raw.index(after: queryStart)...])
+        guard let value = components.queryItems?.first(where: { $0.name == "url" })?.value?
                 .trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty else {
             return nil
@@ -650,6 +734,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !fileURLs.isEmpty || !mediaRequests.isEmpty else { return }
 
         let post: () -> Void = {
+            // 창을 다시 화면에 올린다. 두 번(즉시 + 조금 뒤) 하는 건 SwiftUI 가 이벤트를
+            // 처리하면서 한 번 더 내려버리는 타이밍이 있기 때문.
+            for delay in [0.0, 0.35] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                    MainActor.assumeIsolated { presentPlaybackWindow() }
+                }
+            }
             if !fileURLs.isEmpty {
                 NotificationCenter.default.post(
                     name: .externalOpenURLs,
@@ -671,7 +762,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    /// 여기서 true 를 주면 안 된다. Window 씬은 파일 열기 때 창을 잠깐 내리는데,
+    /// 그 순간을 "마지막 창이 닫혔다"고 보고 앱이 통째로 종료돼 버린다.
+    /// 사용자가 직접 닫는 경우(⌘W)는 Close Window 명령이 직접 종료시킨다.
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Dock 아이콘 클릭 등으로 되돌아왔을 때 창이 내려가 있으면 다시 올린다.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag { Self.presentPlaybackWindow() }
+        return true
+    }
 
     /// 종료 직전에 돌려야 하는 정리. ContentView 가 등록한다 — 저장에 필요한 상태가 거기 있다.
     static var willTerminateCleanup: (() -> Void)?
