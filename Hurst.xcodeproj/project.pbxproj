@@ -11,6 +11,7 @@
 		A100002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100012 /* ContentView.swift */; };
 		A100003 /* VideoSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A100013 /* VideoSampler.swift */; };
 		A10001D /* SettingsWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10001E /* SettingsWindowView.swift */; };
+		A1000F1 /* FFmpegEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000F2 /* FFmpegEngine.swift */; };
 		A100004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A100014 /* Assets.xcassets */; };
 		A100005 /* bpdots.unicase-bold.otf in Resources */ = {isa = PBXBuildFile; fileRef = A100017 /* bpdots.unicase-bold.otf */; };
 		A100006 /* bpdots.unicase-light.otf in Resources */ = {isa = PBXBuildFile; fileRef = A100018 /* bpdots.unicase-light.otf */; };
@@ -25,6 +26,7 @@
 		A100012 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		A100013 /* VideoSampler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoSampler.swift; sourceTree = "<group>"; };
 		A10001E /* SettingsWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindowView.swift; sourceTree = "<group>"; };
+		A1000F2 /* FFmpegEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FFmpegEngine.swift; sourceTree = "<group>"; };
 		A100014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A100015 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A100016 /* Hurst.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Hurst.entitlements; sourceTree = "<group>"; };
@@ -60,6 +62,7 @@
 				A100011 /* HurstApp.swift */,
 					A100012 /* ContentView.swift */,
 					A10001E /* SettingsWindowView.swift */,
+					A1000F2 /* FFmpegEngine.swift */,
 					A100013 /* VideoSampler.swift */,
 				A100023 /* OpenMediaURLIntent.swift */,
 				A100014 /* Assets.xcassets */,
@@ -165,6 +168,7 @@
 					A100001 /* HurstApp.swift in Sources */,
 					A100002 /* ContentView.swift in Sources */,
 					A10001D /* SettingsWindowView.swift in Sources */,
+					A1000F1 /* FFmpegEngine.swift in Sources */,
 					A100003 /* VideoSampler.swift in Sources */,
 				A100022 /* OpenMediaURLIntent.swift in Sources */,
 			);
@@ -240,8 +244,12 @@
 		A100092 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Hurst/Hurst.entitlements;
+				HEADER_SEARCH_PATHS = /opt/homebrew/opt/ffmpeg/include;
+				LIBRARY_SEARCH_PATHS = /opt/homebrew/opt/ffmpeg/lib;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/CFFmpeg";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -263,8 +271,12 @@
 		A100093 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Hurst/Hurst.entitlements;
+				HEADER_SEARCH_PATHS = /opt/homebrew/opt/ffmpeg/include;
+				LIBRARY_SEARCH_PATHS = /opt/homebrew/opt/ffmpeg/lib;
+				SWIFT_INCLUDE_PATHS = "$(SRCROOT)/CFFmpeg";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;

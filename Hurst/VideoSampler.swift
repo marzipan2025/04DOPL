@@ -14,6 +14,8 @@ private let urlLog = Logger(subsystem: "com.hurst.app", category: "url")
 @MainActor
 class VideoSampler: ObservableObject {
     private var player: AVPlayer?
+    /// mkv·avi 등을 직접 읽는 ffmpeg 엔진. 이것으로 틀 때는 `player` 가 nil 이다.
+    private var ffEngine: FFmpegEngine?
     private var videoOutput: AVPlayerItemVideoOutput?
     private var legibleOutput: AVPlayerItemLegibleOutput?
     private var subtitleDelegate: SubtitleDelegate?
@@ -380,8 +382,34 @@ class VideoSampler: ObservableObject {
 
         openedFileURL = url.isFileURL ? url : nil
 
-        // 로컬 파일이고 AVFoundation이 지원 안 하는 확장자면 remux
+        // 로컬 파일이고 AVFoundation이 지원 안 하는 확장자면 ffmpeg 라이브러리로 직접 읽는다.
+        // 그걸로 못 여는 파일(영상이 없는 ogg·wma 등)만 예전처럼 remux 한다.
         if url.isFileURL && Self.needsRemux(url: url) {
+            isLoadingMedia = true
+            let generation = openGeneration
+            Task.detached { [weak self] in
+                let result = Result { try FFmpegEngine(url: url) }
+                await MainActor.run { [weak self] in
+                    guard let self, self.openGeneration == generation else {
+                        if case .success(let engine) = result { engine.close() }
+                        return
+                    }
+                    switch result {
+                    case .success(let engine):
+                        self.isLoadingMedia = false
+                        self.loadEngine(engine)
+                    case .failure:
+                        self.remux(url)
+                    }
+                }
+            }
+        } else {
+            loadPlayable(url: url)
+        }
+    }
+
+    private func remux(_ url: URL) {
+        do {
             isLoadingMedia = true
             let job = RemuxJob()
             activeRemuxJob = job
@@ -405,10 +433,67 @@ class VideoSampler: ObservableObject {
                     }
                 }
             }
-        } else {
-            loadPlayable(url: url)
         }
     }
+
+    /// ffmpeg 엔진으로 연 파일을 튼다. AVPlayer 로 틀 때(`loadPlayable`)와 같은 상태를 만든다.
+    private func loadEngine(_ engine: FFmpegEngine) {
+        ffEngine = engine
+        engine.volume = lastVolume
+        isAudioMode = false
+        videoSize = engine.videoSize
+
+        // 자막: 든 글자 자막이 있으면 내장 자막으로 친다(그림 자막은 읽지 않는다)
+        currentSubtitle = ""
+        legibleGroup = nil
+        firstLegibleOption = nil
+        hasEmbeddedSubtitle = engine.hasTextSubtitles
+        updateHasSubtitlesFlag()
+        if hasExternalSubtitle {
+            subtitleMode = .external
+        } else if showSubtitles && hasEmbeddedSubtitle {
+            subtitleMode = .embedded
+        } else {
+            subtitleMode = .off
+        }
+        applySubtitleMode()
+
+        engine.onEnd = { [weak self] in
+            self?.isPlaying = false
+            NotificationCenter.default.post(name: .playbackEnded, object: nil)
+        }
+        engine.play()
+        isPlaying = true
+
+        let t = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.sampleCurrentFrame() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    /// 지금 재생 위치(초). 엔진에 따라 AVPlayer 나 ffmpeg 엔진에서 읽는다.
+    var playbackSeconds: Double {
+        if let e = ffEngine { return e.currentTime }
+        let t = player?.currentTime().seconds ?? 0
+        return t.isFinite ? t : 0
+    }
+
+    /// 전체 길이(초). 모르면 0.
+    var playbackDurationSeconds: Double {
+        if let e = ffEngine { return e.duration }
+        let d = player?.currentItem?.duration.seconds ?? 0
+        return d.isFinite ? d : 0
+    }
+
+    /// 재생할 영상·소리가 열려 있는지(AVPlayer 든 ffmpeg 엔진이든)
+    var hasPlaybackMedia: Bool { player != nil || ffEngine != nil }
+
+    /// ffmpeg 엔진으로 틀고 있는지. 피크 화면이 AVPlayerLayer 대신 프레임을 직접 그린다.
+    var isUsingFrameEngine: Bool { ffEngine != nil }
+
+    /// 피크 화면용: 마지막으로 꺼낸 원본 프레임(BGRA)
+    var latestPixelBuffer: CVPixelBuffer? { lastPixelBuffer }
 
     /// AVPlayer가 바로 재생 가능한 URL을 로드
     private func loadPlayable(url: URL) {
@@ -1391,6 +1476,13 @@ class VideoSampler: ObservableObject {
     // MARK: - Controls
 
     func seek(toSeconds seconds: Double) {
+        if let e = ffEngine {
+            let d = e.duration
+            let target = d > 0 ? min(max(0, seconds), max(0, d - 0.25)) : max(0, seconds)
+            e.seek(to: target, accurate: true, done: nil)
+            startTimerIfNeeded()
+            return
+        }
         guard let player else { return }
         let safeSeconds = max(0, seconds)
         if let item = player.currentItem {
@@ -1413,8 +1505,12 @@ class VideoSampler: ObservableObject {
     }
 
     func togglePlayPause() {
-        guard let player else { return }
-        if isPlaying { player.pause() } else { player.play() }
+        if let e = ffEngine {
+            if isPlaying { e.pause() } else { e.play() }
+        } else {
+            guard let player else { return }
+            if isPlaying { player.pause() } else { player.play() }
+        }
         isPlaying.toggle()
         startTimerIfNeeded()
         showOverlay(.border, blinks: 2)
@@ -1431,7 +1527,7 @@ class VideoSampler: ObservableObject {
     /// 이미지 모드는 openImage에서 세팅한 lastPixelBuffer를 그대로 사용.
     func currentFrameCGImage() -> CGImage? {
         var buffer = lastPixelBuffer
-        if let output = videoOutput, let player {
+        if ffEngine == nil, let output = videoOutput, let player {
             let time = player.currentTime()
             if time.isValid, !time.isIndefinite,
                let fresh = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
@@ -1445,6 +1541,7 @@ class VideoSampler: ObservableObject {
 
     /// 피크 시작: 강제 재생. 이전 상태(play/pause)와 무관하게 재생 시작.
     func peekStart() {
+        if let e = ffEngine { e.play(); isPlaying = true; return }
         guard let player else { return }
         player.play()
         isPlaying = true
@@ -1453,11 +1550,19 @@ class VideoSampler: ObservableObject {
     /// 피크 종료: 무조건 일시정지. 사양상 뗀 후엔 항상 pause.
     func peekEnd() {
         player?.pause()
+        ffEngine?.pause()
         isPlaying = false
     }
 
     // 숫자키: fraction = 0.1 ~ 0.9
     func seek(toFraction fraction: Double) {
+        if let e = ffEngine {
+            guard e.duration > 0 else { return }
+            e.seek(to: e.duration * fraction, accurate: true, done: nil)
+            startTimerIfNeeded()
+            showOverlay(.col(seekCol(fraction: fraction)), blinks: 1)
+            return
+        }
         guard let player, let item = player.currentItem else { return }
         Task {
             let duration = try? await item.asset.load(.duration)
@@ -1471,6 +1576,20 @@ class VideoSampler: ObservableObject {
 
     // 콤마/마침표: 가로 한 칸 단위 이동
     func seekByColumn(delta: Int) {
+        if let e = ffEngine {
+            guard e.duration > 0 else { return }
+            let visibleCols = max(1, (dotColors.first?.count ?? 2) - 2)
+            let rawTarget = e.currentTime + Double(delta) * e.duration / Double(visibleCols)
+            let atStart = delta < 0 && rawTarget <= 0
+            let atEnd   = delta > 0 && rawTarget >= e.duration
+            let clamped = min(max(0, rawTarget), e.duration)
+            e.seek(to: clamped, accurate: true, done: nil)
+            startTimerIfNeeded()
+            showOverlay(.col(seekCol(fraction: clamped / e.duration)),
+                        blinks: (atStart || atEnd) ? 2 : 1,
+                        alert: atStart || atEnd)
+            return
+        }
         guard let player, let item = player.currentItem else { return }
         let duration = item.duration
         guard duration.isValid && !duration.isIndefinite && duration.seconds > 0 else { return }
@@ -1495,6 +1614,13 @@ class VideoSampler: ObservableObject {
 
     // 방향키: ±seconds
     func seek(by seconds: Double) {
+        if let e = ffEngine {
+            let target = e.duration > 0 ? min(max(0, e.currentTime + seconds), e.duration) : max(0, e.currentTime + seconds)
+            e.seek(to: target, accurate: false, done: nil)
+            startTimerIfNeeded()
+            if e.duration > 0 { showOverlay(.col(seekCol(fraction: target / e.duration)), blinks: 1) }
+            return
+        }
         guard let player, let item = player.currentItem else { return }
         let current = player.currentTime()
         let target  = CMTimeAdd(current, CMTime(seconds: seconds, preferredTimescale: 600))
@@ -1513,35 +1639,39 @@ class VideoSampler: ObservableObject {
 
     // 볼륨 위 (최대 120%)
     func volumeUp() {
-        guard let player else { return }
+        guard hasPlaybackMedia else { return }
         let visibleRows = max(1, dotColors.count - 2)
         let step = Float(1.0) / Float(visibleRows)
         let maxVol: Float = 1.2
-        let atMax = player.volume >= maxVol - step * 0.5  // 엡실론: 반 칸 이내면 최대로 간주
+        let atMax = lastVolume >= maxVol - step * 0.5  // 엡실론: 반 칸 이내면 최대로 간주
         if !atMax { 
-            player.volume = min(maxVol, player.volume + step)
-            lastVolume = player.volume
-            UserDefaults.standard.set(lastVolume, forKey: Self.volumeKey)
+            setVolume(min(maxVol, lastVolume + step))
         }
         startTimerIfNeeded()
-        showOverlay(.row(volumeRow(volume: Double(player.volume), visibleRows: visibleRows)),
+        showOverlay(.row(volumeRow(volume: Double(lastVolume), visibleRows: visibleRows)),
                     blinks: atMax ? 2 : 1, alert: atMax)
     }
 
     // 볼륨 아래
     func volumeDown() {
-        guard let player else { return }
+        guard hasPlaybackMedia else { return }
         let visibleRows = max(1, dotColors.count - 2)
         let step = Float(1.0) / Float(visibleRows)
-        let atMin = player.volume <= step * 0.5           // 엡실론: 반 칸 이내면 최소로 간주
+        let atMin = lastVolume <= step * 0.5           // 엡실론: 반 칸 이내면 최소로 간주
         if !atMin { 
-            player.volume = max(0.0, player.volume - step)
-            lastVolume = player.volume
-            UserDefaults.standard.set(lastVolume, forKey: Self.volumeKey)
+            setVolume(max(0.0, lastVolume - step))
         }
         startTimerIfNeeded()
-        showOverlay(.row(volumeRow(volume: Double(player.volume), visibleRows: visibleRows)),
+        showOverlay(.row(volumeRow(volume: Double(lastVolume), visibleRows: visibleRows)),
                     blinks: atMin ? 2 : 1, alert: atMin)
+    }
+
+    /// 음량을 바꿔 저장한다. ffmpeg 엔진의 소리 출력은 1.0 이 상한이다(AVPlayer 도 1.0 을 넘는 값은 같게 들린다).
+    private func setVolume(_ v: Float) {
+        lastVolume = v
+        player?.volume = v
+        ffEngine?.volume = v
+        UserDefaults.standard.set(lastVolume, forKey: Self.volumeKey)
     }
 
     // MARK: - Helpers
@@ -1751,7 +1881,21 @@ class VideoSampler: ObservableObject {
         // 이미지 모드: videoOutput/player가 nil이므로 이 블록은 건너뛰고
         // `openImage`에서 세팅한 lastPixelBuffer를 재사용한다.
         var didAdvanceFrame = false
-        if let output = videoOutput, let player {
+        if let e = ffEngine {
+            if let buffer = e.newFrame() {
+                lastPixelBuffer = buffer
+                videoFrameGeneration &+= 1
+            }
+            // AVPlayer 의 시간 관찰자 대신 여기서 자막을 맞춘다
+            let now = e.currentTime
+            switch effectiveSubtitleMode() {
+            case .external: updateExternalSubtitle(at: now)
+            case .embedded:
+                let text = e.subtitleText(at: now)
+                if currentSubtitle != text { currentSubtitle = text }
+            case .off: break
+            }
+        } else if let output = videoOutput, let player {
             let hostTime = CACurrentMediaTime()
             let displayTime = output.itemTime(forHostTime: hostTime)
             let currentTime = player.currentTime()
@@ -1923,6 +2067,8 @@ class VideoSampler: ObservableObject {
         subtitleMode = .off
         player?.pause()
         player = nil
+        ffEngine?.close()
+        ffEngine = nil
         videoOutput = nil
         legibleOutput = nil
         subtitleDelegate = nil
